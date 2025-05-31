@@ -13,11 +13,11 @@ GITHUB_GRAPHQL_URL: str = "https://api.github.com/graphql"
 REPO_OWNER: str = "google"
 REPO_NAME: str = "jax"
 
-NUM_ISSUES_TO_FETCH: int = 10
+NUM_ISSUES_TO_FETCH: int = 1000
 MAX_ISSUES_PER_PAGE: int = 100
 NUM_COMMENTS_PER_ISSUE: int = 20
 
-OUTPUT_FILENAME: str = "data/jax_issues_qa_pairs.json"
+OUTPUT_FILENAME: str = f"data/{NUM_ISSUES_TO_FETCH}_jax_issues_qa_pairs.json"
 
 
 # --- GraphQL Query ---
