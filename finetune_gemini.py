@@ -1,8 +1,9 @@
 import json
 import os
 import random
+import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Generic, Iterable, Optional, TypedDict, TypeVar
+from typing import Any, Callable, Dict, Iterable, Optional, TypedDict, TypeVar
 
 from dotenv import load_dotenv
 from google.generativeai.generative_models import GenerativeModel
@@ -14,6 +15,7 @@ os.environ["GOOGLE_API_USE_MTLS_ENDPOINT"] = "never"  # Disable MTLS
 
 assert load_dotenv(), "Couldn't load envvars"
 GOOGLE_API_KEY: Optional[str] = os.getenv("GOOGLE_API_KEY")
+MODEL_NAME: None | str = "qa-commits-9543" # if already finetuned
 
 # -- Setup --
 K = TypeVar("K")
@@ -65,10 +67,7 @@ def truncate_sample(
     }
 
 
-T = TypeVar("T", bound=Dict[str, Any])
-
-
-class LoadedDataset(Generic[T]):
+class LoadedDataset[T: Dict[str, Any]]:
     def __init__(
         self,
         data: Path | list[T],
@@ -94,16 +93,15 @@ class LoadedDataset(Generic[T]):
 
         return LoadedDataset(filtered, mod_fn=self._get_mod_fn)  # type: ignore
 
-    def flatten_conversations(self) -> "LoadedDataset[Dict[str, Any]]":
+    def flatten_on_key(
+        self, key: str = "conversation"
+    ) -> "LoadedDataset[Dict[str, Any]]":
         flattened: list[Dict[str, Any]] = []
-        for item in self.data:  # type: ignore
-            if (
-                isinstance(item, dict)
-                and "conversation" in item
-                and isinstance(item["conversation"], list)
-            ):
-                # we know item["conversation"] is List[T], but we lose the original TypedDict at this point
-                flattened.extend(item["conversation"])
+
+        for item in self.data:
+            if isinstance(item, dict) and key in item and isinstance(item[key], list):
+                # we know item[key] is List[T], but we lose the original TypedDict at this point
+                flattened.extend(item[key])
             else:
                 flattened.append(item)
 
@@ -140,9 +138,7 @@ class LoadedDataset(Generic[T]):
         return LoadedDataset(combined, self._get_mod_fn)
 
 
-def finetune_model(data: LoadedDataset):
-    name = f"qa-issues-{random.randint(0, 10000)}"
-
+def finetune_model(data: LoadedDataset, name: str):
     base_model = [
         m
         for m in list_models()
@@ -154,11 +150,18 @@ def finetune_model(data: LoadedDataset):
         training_data=data,
         id=name,
         epoch_count=1,
-        batch_size=4,
+        batch_size=64,
         learning_rate=0.001,
     )
+
     model = get_tuned_model(f"tunedModels/{name}")
-    print(model)
+
+    print("Waiting for finetuning to complete...")
+
+    while not operation.done():
+        time.sleep(20)
+
+    return operation, model
 
 
 def load_finetuned_model(model_name: str, question: str) -> GenerateContentResponse:
@@ -167,16 +170,29 @@ def load_finetuned_model(model_name: str, question: str) -> GenerateContentRespo
 
 
 def main():
-    dataset = (
+    model_name = f"qa-commits-{random.randint(0, 10000)}"
+
+    qa_dataset = (
         LoadedDataset(Path("data/jax_issues_qa_pairs.json"), truncate_sample)  # type: ignore
         .extract_keys("conversation")
-        .flatten_conversations()
+        .flatten_on_key("conversation")
         .extract_keys(["text_input", "output"])
     )
 
-    output = load_finetuned_model(
-        "qa-issues-3039", "Can you do a deep dive into how XLA works?"
+    commits_dataset = LoadedDataset(
+        Path("data/500_documented_commits.json"),
+        truncate_sample,  # type: ignore
     )
+
+    combined_dataset = qa_dataset + commits_dataset
+    # operation, _ = finetune_model(combined_dataset, model_name)
+
+    finetuned_model_name = MODEL_NAME if MODEL_NAME else model_name
+
+    output = load_finetuned_model(
+        finetuned_model_name, "Can you do a deep dive into how XLA works?"
+    )
+
     print(f"Model output: {output.text}")
 
 

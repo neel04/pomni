@@ -218,7 +218,7 @@ def extract_author_info(commit: Dict[str, Any]) -> List[str]:
     return authors if authors else ["unknown"]
 
 
-def format_commit_diff(diff_text: str, commit: Dict[str, Any]) -> List[str]:
+def format_commit_diff(diff_text: str, commit: Dict[str, Any]) -> str:
     """
     Formats the commit diff with metadata and proper diff formatting.
 
@@ -230,7 +230,7 @@ def format_commit_diff(diff_text: str, commit: Dict[str, Any]) -> List[str]:
         List containing the formatted diff with metadata
     """
     if not diff_text:
-        return ["No diff available"]
+        return "No diff available"
 
     # Add metadata header
     metadata = [
@@ -245,7 +245,7 @@ def format_commit_diff(diff_text: str, commit: Dict[str, Any]) -> List[str]:
     # Format the diff with proper markdown
     formatted_diff = "```diff\n" + "\n".join(metadata) + diff_text + "\n```"
 
-    return [formatted_diff]
+    return formatted_diff
 
 
 def process_commits_to_training_data(
