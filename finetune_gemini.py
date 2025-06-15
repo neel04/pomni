@@ -47,9 +47,9 @@ def finetune_model(data: LoadedDataset, name: str) -> GenerativeModel:
         source_model=base_model.name,
         training_data=data,
         id=name,
-        epoch_count=1,
+        epoch_count=10,
         batch_size=64,
-        learning_rate=0.001,
+        learning_rate=9e-3,
     )
 
     model = get_tuned_model(f"tunedModels/{name}")

@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, Iterable, TypedDict, overload
 
 from google.generativeai.generative_models import GenerativeModel
 from google.generativeai.models import list_models
-from google.generativeai.types import GenerateContentResponse
+from google.generativeai.types import GenerateContentResponse, TunedModel
 
 
 class GeminiSample(TypedDict):
@@ -148,13 +148,22 @@ def load_finetuned_model(model_name: str) -> GenerativeModel:
 
 
 def generate_from_model(
-    model: GenerativeModel, question: str, is_str: bool = False
+    model: GenerativeModel | TunedModel, question: str, is_str: bool = False
 ) -> GenerateContentResponse | str:
     """
     Samples from the model. `is_str` determines whether the output is a raw `str` or
     A `GenerateContentResponse` struct.
     """
-    out = model.generate_content(question)
+
+    match model:
+        case GenerativeModel():
+            out = model.generate_content(question)
+        case TunedModel():
+            assert model.name is not None, (
+                "Could not get finetuned model name implicitly from object."
+            )
+            _model = load_finetuned_model(model.name.split("/")[-1])
+            out = _model.generate_content(question)
 
     if is_str:
         return out.text

@@ -10,6 +10,7 @@ dependencies = [
     "patdb>=0.1.0",
     "pylsp-rope>=0.1.17",
     "requests>=2.32.3",
+    "vertexai>=1.71.1",
 ]
 
 [dependency-groups]
