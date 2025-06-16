@@ -194,3 +194,4 @@ cython_debug/
 .cursorindexingignore
 uv.lock
 .aider*
+jax
