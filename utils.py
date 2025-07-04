@@ -1,7 +1,7 @@
 import json
 from logging import Logger
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, TypedDict, overload
+from typing import Any, Callable, Dict, Generic, Iterable, TypedDict, TypeVar, overload
 
 from google.generativeai.generative_models import GenerativeModel
 from google.generativeai.models import list_models
@@ -30,11 +30,11 @@ class QAIssue(TypedDict):
     url: str
     conversation: list[IssuesSample]
 
-
+T = TypeVar("T", bound=Dict[str, Any])
 IssuesDataset = list[QAIssue]
 
 
-class LoadedDataset[T: Dict[str, Any]]:
+class LoadedDataset(Generic[T]):
     def __init__(
         self,
         data: Path | list[T],
