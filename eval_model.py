@@ -200,7 +200,7 @@ def extract_scores(judge_response: str) -> Tuple[Optional[int], Optional[int]]:
 
 
 async def eval_model_async(
-    eval_data: LoadedDataset,
+    eval_data: LoadedDataset[Dict[str, Any]],
     model_name: str,
     reference_model_name: str,
     judge_model_name: str,
@@ -337,7 +337,7 @@ async def eval_model_async(
 
 
 def eval_model(
-    eval_data: LoadedDataset,
+    eval_data: LoadedDataset[Dict[str, Any]],
     model_name: str,
     reference_model_name: Optional[str] = None,
     judge_model_name: Optional[str] = None,
@@ -367,7 +367,7 @@ def eval_model(
 
 
 def run_async_eval(
-    logger: logging.Logger, eval_data: LoadedDataset, finetuned_model_name: str
+    logger: logging.Logger, eval_data: LoadedDataset[Dict[str, Any]], finetuned_model_name: str
 ):
     reference_model_name = get_default_reference_model(logger)
 

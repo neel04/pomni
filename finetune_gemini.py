@@ -36,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def finetune_model(data: LoadedDataset, name: str) -> GenerativeModel:
+def finetune_model(data: LoadedDataset[Dict[str, Any]], name: str) -> GenerativeModel:
     base_model = [
         m
         for m in list_models()

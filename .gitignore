@@ -195,3 +195,4 @@ cython_debug/
 uv.lock
 .aider*
 jax
+.opencode
