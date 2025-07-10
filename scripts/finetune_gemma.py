@@ -90,7 +90,7 @@ def main():
     print("--- Running inference before fine-tuning ---")
     run_inference(gemma_lm, "Fix self-attention bug", max_length=256, seed=2)
 
-    data = load_data(os.path.abspath("data/500_documented_commits.json"))
+    data = load_data("./data/500_documented_commits.json")
 
     print("\n--- Starting fine-tuning ---")
     fine_tune_model(

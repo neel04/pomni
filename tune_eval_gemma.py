@@ -155,7 +155,7 @@ def main():
     run_inference(gemma_lm, "Fix self-attention bug", max_length=256, seed=2)
 
     print("\n=== Loading training data ===")
-    data = load_data(os.path.abspath("data/500_documented_commits.json"))
+    data = load_data("data/500_documented_commits.json")
     print(f"Loaded {len(data['prompts'])} training samples")
 
     print("\n=== Starting fine-tuning ===")
