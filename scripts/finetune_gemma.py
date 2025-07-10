@@ -9,7 +9,7 @@ from keras_hub.models import Gemma3CausalLM  # pyright: ignore[reportMissingImpo
 
 def set_environment():
     """Sets the environment variables for Keras and XLA."""
-    os.environ["KERAS_BACKEND"] = "tensorflow"
+    os.environ["KERAS_BACKEND"] = "jax"
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.95"
 
 
