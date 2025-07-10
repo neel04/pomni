@@ -3,12 +3,14 @@ name = "pomni"
 version = "0.1.0"
 description = "JAX Code assistant"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
     "google-generativeai>=0.8.5",
     "ipykernel>=6.29.5",
     "jupyter>=1.1.1",
+    "keras>=3.10.0",
+    "keras-hub>=0.19.0",
     "nbformat>=5.10.4",
     "pandas>=2.3.0",
     "patdb>=0.1.0",
