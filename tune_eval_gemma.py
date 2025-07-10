@@ -40,7 +40,15 @@ def run_inference(
 def load_data(file_path: str) -> Dict[str, List[str]]:
     prompts = []
     responses = []
-    with open(file_path) as file:
+    
+    # Make path relative to script location
+    script_dir = Path(__file__).parent
+    full_path = script_dir / file_path
+    
+    if not full_path.exists():
+        raise FileNotFoundError(f"Data file not found: {full_path}")
+    
+    with open(full_path) as file:
         data_list = json.load(file)
 
     for examples in data_list:
@@ -134,15 +142,18 @@ def compare_performance(unfinetuned_results, finetuned_results):
 
 
 def save_results(unfinetuned_results, finetuned_results, output_dir: str = "results"):
-    os.makedirs(output_dir, exist_ok=True)
+    # Make output dir relative to script location  
+    script_dir = Path(__file__).parent
+    full_output_dir = script_dir / output_dir
+    os.makedirs(full_output_dir, exist_ok=True)
 
-    with open(f"{output_dir}/unfinetuned_eval_results.json", "w") as f:
+    with open(full_output_dir / "unfinetuned_eval_results.json", "w") as f:
         json.dump(unfinetuned_results, f, indent=2)
 
-    with open(f"{output_dir}/finetuned_eval_results.json", "w") as f:
+    with open(full_output_dir / "finetuned_eval_results.json", "w") as f:
         json.dump(finetuned_results, f, indent=2)
 
-    print(f"Results saved to {output_dir}/")
+    print(f"Results saved to {full_output_dir}/")
 
 
 def main():
@@ -178,8 +189,10 @@ def main():
     gemma_lm.save_weights(finetuned_model_path)
 
     print("\n=== Loading evaluation data ===")
+    script_dir = Path(__file__).parent
+    eval_data_path = script_dir / "data/so_jax_qa_pairs.json"
     eval_data = LoadedDataset(
-        Path("data/so_jax_qa_pairs.json"),
+        eval_data_path,
         truncate_sample,
     )
     print(f"Loaded {len(eval_data)} evaluation samples")
