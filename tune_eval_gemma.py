@@ -1,15 +1,20 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Dict, List
 
 import keras
 import keras_hub
+from dotenv import load_dotenv
+from google.generativeai.generative_models import GenerativeModel
 from keras_hub.models import Gemma3CausalLM
 
-from eval_model import eval_model
-from utils import LoadedDataset, truncate_sample
+from utils import LoadedDataset, generate_from_model, truncate_sample
+
+# Load environment variables for API access
+load_dotenv()
 
 
 def set_environment():
@@ -87,75 +92,216 @@ def fine_tune_model(
     model.fit(data, epochs=epochs, batch_size=batch_size)
 
 
+def generate_eval_template(question: str, answer_1: str, answer_2: str):
+    return (
+        "You are a judge model. Your task is to compare 2 answers to a given question and score them based on a scale of 1 through 10."
+        + "You are provided the original question, as well, as the corresponding answers by the 2 models."
+        + "Judge both the answers on their conciseness, clarity and most importantly - accuracy."
+        + "You should output the scores at the end of your deliberation. The scores should be in format: `JUDGE_SCORES: (<score_1>, <score_2>)` where the tuples contain two `int`s between 0 and 10."
+        + f"This is the original question: ```markdown{question}```"
+        + f"\nModel Answer 1: {answer_1}"
+        + f"\nModel Answer 2: {answer_2}"
+    )
+
+
+def extract_scores(judge_response: str) -> tuple[int | None, int | None]:
+    """Extract the scores from the judge model's response."""
+    pattern = r"JUDGE_SCORES:\s*\((\d+),\s*(\d+)\)"
+    match = re.search(pattern, judge_response)
+
+    if match:
+        try:
+            score_1 = int(match.group(1))
+            score_2 = int(match.group(2))
+            return score_1, score_2
+        except (ValueError, IndexError):
+            pass
+
+    print(f"Failed to extract scores from judge response: {judge_response[:100]}...")
+    return None, None
+
+
+def evaluate_model_locally(
+    model: Gemma3CausalLM,
+    eval_data: LoadedDataset,
+    max_samples: int = 20,
+    max_length: int = 256,
+):
+    """Evaluate model locally on a dataset by generating responses."""
+    results = []
+
+    print(f"Evaluating on {min(max_samples, len(eval_data))} samples...")
+
+    for i, sample in enumerate(eval_data[:max_samples]):
+        question = sample["text_input"]
+
+        # Generate response using the model
+        prompt = f"Question: {question}\nAnswer:"
+        try:
+            sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
+            model.compile(sampler=sampler)
+            generated_output = model.generate(prompt, max_length=max_length)
+
+            # Extract just the answer part (remove the prompt)
+            if prompt in generated_output:
+                answer = generated_output[len(prompt) :].strip()
+            else:
+                answer = generated_output.strip()
+
+        except Exception as e:
+            print(f"Error generating for sample {i}: {e}")
+            answer = f"Error: {str(e)}"
+
+        results.append(answer)
+
+        if i % 5 == 0:
+            print(f"Completed {i + 1}/{min(max_samples, len(eval_data))} samples")
+
+    return results
+
+
 def evaluate_models(
     eval_data: LoadedDataset,
     unfinetuned_model_name: str,
     finetuned_model_name: str,
-    judge_model: str,
+    judge_model_name: str,
     baseline_model: str,
+    max_samples: int = 20,
 ):
+    """Evaluate both unfinetuned and finetuned models locally, then judge with Gemini."""
+    # Generate responses from both models
     print("\n--- Evaluating unfinetuned model ---")
-    unfinetuned_results = eval_model(
-        eval_data,
-        unfinetuned_model_name,
-        judge_model,
-        baseline_model,
+    unfinetuned_model = load_model(unfinetuned_model_name)
+    unfinetuned_outputs = evaluate_model_locally(
+        unfinetuned_model, eval_data, max_samples
     )
+
+    print("\n--- Loading finetuned model ---")
+    finetuned_model = load_model(unfinetuned_model_name)
+
+    # Load the finetuned weights
+    weights_path = (
+        finetuned_model_name
+        if finetuned_model_name.endswith(".weights.h5")
+        else f"{finetuned_model_name}.weights.h5"
+    )
+    try:
+        finetuned_model.load_weights(weights_path)
+        print(f"Loaded finetuned weights from {weights_path}")
+    except Exception as e:
+        print(f"Warning: Could not load finetuned weights: {e}")
+        print("Using unfinetuned model for comparison")
 
     print("\n--- Evaluating finetuned model ---")
-    finetuned_results = eval_model(
-        eval_data,
-        finetuned_model_name,
-        judge_model,
-        baseline_model,
+    finetuned_outputs = evaluate_model_locally(finetuned_model, eval_data, max_samples)
+
+    # Now judge the outputs using Gemini
+    print(f"\n--- Judging outputs with {judge_model_name} ---")
+    judge_model = GenerativeModel(judge_model_name)
+
+    results = []
+    for i, sample in enumerate(eval_data[:max_samples]):
+        question = sample["text_input"]
+        unfinetuned_answer = unfinetuned_outputs[i]
+        finetuned_answer = finetuned_outputs[i]
+
+        # Create judge prompt
+        judge_prompt = generate_eval_template(
+            question, finetuned_answer, unfinetuned_answer
+        )
+
+        try:
+            judge_response = generate_from_model(
+                judge_model, judge_prompt, verbose=False
+            )
+            finetuned_score, unfinetuned_score = extract_scores(judge_response)
+        except Exception as e:
+            print(f"Error getting judge response for sample {i}: {e}")
+            judge_response = f"Error: {str(e)}"
+            finetuned_score, unfinetuned_score = None, None
+
+        result = {
+            "question": question,
+            "finetuned_output": finetuned_answer,
+            "unfinetuned_output": unfinetuned_answer,
+            "finetuned_score": finetuned_score,
+            "unfinetuned_score": unfinetuned_score,
+            "judge_response": judge_response,
+        }
+        results.append(result)
+
+        if i % 5 == 0:
+            print(f"Judged {i + 1}/{max_samples} samples")
+
+    return results
+
+
+def compare_performance(results):
+    """Compare the performance between unfinetuned and finetuned models using judge scores."""
+    print("\n--- Performance Comparison ---")
+
+    # Extract valid scores
+    valid_results = [
+        r
+        for r in results
+        if r["finetuned_score"] is not None and r["unfinetuned_score"] is not None
+    ]
+
+    if not valid_results:
+        print("❌ No valid scores found from judge model")
+        return
+
+    finetuned_scores = [r["finetuned_score"] for r in valid_results]
+    unfinetuned_scores = [r["unfinetuned_score"] for r in valid_results]
+
+    avg_finetuned = sum(finetuned_scores) / len(finetuned_scores)
+    avg_unfinetuned = sum(unfinetuned_scores) / len(unfinetuned_scores)
+
+    print(f"Valid evaluations: {len(valid_results)}/{len(results)}")
+    print(f"Finetuned model average score: {avg_finetuned:.2f}")
+    print(f"Unfinetuned model average score: {avg_unfinetuned:.2f}")
+    print(f"Improvement: {avg_finetuned - avg_unfinetuned:.2f}")
+
+    # Win/loss/tie statistics
+    wins = sum(
+        1 for r in valid_results if r["finetuned_score"] > r["unfinetuned_score"]
+    )
+    losses = sum(
+        1 for r in valid_results if r["finetuned_score"] < r["unfinetuned_score"]
+    )
+    ties = sum(
+        1 for r in valid_results if r["finetuned_score"] == r["unfinetuned_score"]
     )
 
-    return unfinetuned_results, finetuned_results
+    print(f"Finetuned model: {wins} wins, {losses} losses, {ties} ties")
 
-
-def compare_performance(unfinetuned_results, finetuned_results):
-    unfinetuned_scores = [
-        r["tuned_model_score"]
-        for r in unfinetuned_results
-        if r["tuned_model_score"] is not None
-    ]
-    finetuned_scores = [
-        r["tuned_model_score"]
-        for r in finetuned_results
-        if r["tuned_model_score"] is not None
-    ]
-
-    if unfinetuned_scores and finetuned_scores:
-        avg_unfinetuned = sum(unfinetuned_scores) / len(unfinetuned_scores)
-        avg_finetuned = sum(finetuned_scores) / len(finetuned_scores)
-
-        print("\n--- Performance Comparison ---")
-        print(f"Unfinetuned model average score: {avg_unfinetuned:.2f}")
-        print(f"Finetuned model average score: {avg_finetuned:.2f}")
-        print(f"Improvement: {avg_finetuned - avg_unfinetuned:.2f}")
-
-        if avg_finetuned > avg_unfinetuned:
-            print("✅ Finetuning improved performance!")
-        elif avg_finetuned < avg_unfinetuned:
-            print("❌ Finetuning decreased performance")
-        else:
-            print("➖ No change in performance")
+    if avg_finetuned > avg_unfinetuned:
+        print("✅ Finetuning improved performance!")
+    elif avg_finetuned < avg_unfinetuned:
+        print("❌ Finetuning decreased performance")
     else:
-        print("❌ Could not compare performance - no valid scores extracted")
+        print("➖ No change in performance")
+
+    # Show sample comparisons
+    print("\n--- Sample Comparisons ---")
+    for i, r in enumerate(valid_results[:3]):
+        print(f"\nSample {i + 1}:")
+        print(f"Question: {r['question'][:100]}...")
+        print(f"Finetuned ({r['finetuned_score']}): {r['finetuned_output'][:150]}...")
+        print(
+            f"Unfinetuned ({r['unfinetuned_score']}): {r['unfinetuned_output'][:150]}..."
+        )
 
 
-def save_results(unfinetuned_results, finetuned_results, output_dir: str = "results"):
+def save_results(results, output_dir: str = "results"):
     script_dir = Path(__file__).parent
     full_output_dir = script_dir / output_dir
     os.makedirs(full_output_dir, exist_ok=True)
 
-    with open(full_output_dir / "unfinetuned_eval_results.json", "w") as f:
-        json.dump(unfinetuned_results, f, indent=2)
+    with open(full_output_dir / "gemma_eval_results.json", "w") as f:
+        json.dump(results, f, indent=2)
 
-    with open(full_output_dir / "finetuned_eval_results.json", "w") as f:
-        json.dump(finetuned_results, f, indent=2)
-
-    print(f"Results saved to {full_output_dir}/")
+    print(f"Results saved to {full_output_dir}/gemma_eval_results.json")
 
 
 def parse_args():
@@ -298,7 +444,11 @@ def main():
         )
 
         print(f"\n=== Saving finetuned model to {args.output_model} ===")
-        output_path = args.output_model if args.output_model.endswith('.weights.h5') else f"{args.output_model}.weights.h5"
+        output_path = (
+            args.output_model
+            if args.output_model.endswith(".weights.h5")
+            else f"{args.output_model}.weights.h5"
+        )
         gemma_lm.save_weights(output_path)
 
     if not args.skip_evaluation:
@@ -312,17 +462,18 @@ def main():
         print(f"Loaded {len(eval_data)} evaluation samples")
 
         print("\n=== Evaluating models ===")
-        unfinetuned_results, finetuned_results = evaluate_models(
+        results = evaluate_models(
             eval_data,
             args.model,
             args.output_model,
             args.eval_judge,
             args.eval_baseline,
+            20,  # max_samples
         )
 
-        compare_performance(unfinetuned_results, finetuned_results)
+        compare_performance(results)
 
-        save_results(unfinetuned_results, finetuned_results, args.output_dir)
+        save_results(results, args.output_dir)
 
     print("\n🎉 Complete! Finetuning and evaluation finished.")
 
