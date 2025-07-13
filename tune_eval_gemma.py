@@ -10,6 +10,7 @@ import keras_hub
 from dotenv import load_dotenv
 from google.generativeai.generative_models import GenerativeModel
 from keras_hub.models import Gemma3CausalLM
+from tqdm import tqdm
 
 from utils import LoadedDataset, generate_from_model, truncate_sample
 
@@ -140,7 +141,7 @@ def evaluate_model_locally(
         model.compile(sampler=sampler)
         model._compiled_for_eval = True
 
-    for i, sample in enumerate(eval_data[:max_samples]):
+    for i, sample in tqdm(enumerate(eval_data[:max_samples])):
         question = sample["text_input"]
 
         # Generate response using the model
