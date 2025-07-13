@@ -35,8 +35,10 @@ def run_inference(
     template: str = "Instruction:{instruction}\n\nResponse:{response}",
 ):
     prompt = template.format(instruction=instruction, response="")
-    sampler = keras_hub.samplers.TopKSampler(k=5, seed=seed)
-    model.compile(sampler=sampler)
+    if not hasattr(model, '_compiled_for_inference'):
+        sampler = keras_hub.samplers.TopKSampler(k=5, seed=seed)
+        model.compile(sampler=sampler)
+        model._compiled_for_inference = True
     output = model.generate(prompt, max_length=max_length)
     print(f"Inference output: {output}")
     return output
@@ -131,6 +133,12 @@ def evaluate_model_locally(
     results = []
 
     print(f"Evaluating on {min(max_samples, len(eval_data))} samples...")
+    
+    # Compile once at the start
+    if not hasattr(model, '_compiled_for_eval'):
+        sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
+        model.compile(sampler=sampler)
+        model._compiled_for_eval = True
 
     for i, sample in enumerate(eval_data[:max_samples]):
         question = sample["text_input"]
@@ -138,8 +146,6 @@ def evaluate_model_locally(
         # Generate response using the model
         prompt = f"Question: {question}\nAnswer:"
         try:
-            sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
-            model.compile(sampler=sampler)
             generated_output = model.generate(prompt, max_length=max_length)
 
             # Extract just the answer part (remove the prompt)
