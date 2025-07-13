@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 from pathlib import Path
@@ -30,7 +31,7 @@ def run_inference(
 ):
     prompt = template.format(instruction=instruction, response="")
     sampler = keras_hub.samplers.TopKSampler(k=5, seed=seed)
-    model.compile(sampler=sampler)  # pyright: ignore[reportArgumentType]
+    model.compile(sampler=sampler)
     output = model.generate(prompt, max_length=max_length)
     print(f"Inference output: {output}")
     return output
@@ -40,7 +41,6 @@ def load_data(file_path: str) -> Dict[str, List[str]]:
     prompts = []
     responses = []
     
-    # Make path relative to script location
     script_dir = Path(__file__).parent
     full_path = script_dir / file_path
     
@@ -70,7 +70,7 @@ def fine_tune_model(
     model.backbone.enable_lora(rank=rank)
     print(model.summary())
 
-    model.preprocessor.sequence_length = sequence_length  # pyright: ignore[reportOptionalMemberAccess]
+    model.preprocessor.sequence_length = sequence_length
     optimizer = keras.optimizers.AdamW(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
@@ -88,22 +88,26 @@ def fine_tune_model(
 
 
 def evaluate_models(
-    eval_data: LoadedDataset, unfinetuned_model_name: str, finetuned_model_name: str
+    eval_data: LoadedDataset,
+    unfinetuned_model_name: str,
+    finetuned_model_name: str,
+    judge_model: str,
+    baseline_model: str,
 ):
     print("\n--- Evaluating unfinetuned model ---")
     unfinetuned_results = eval_model(
         eval_data,
         unfinetuned_model_name,
-        "gemini-2.5-flash-preview-05-20",
-        "gemini-2.5-flash-preview-05-20",
+        judge_model,
+        baseline_model,
     )
 
     print("\n--- Evaluating finetuned model ---")
     finetuned_results = eval_model(
         eval_data,
         finetuned_model_name,
-        "gemini-2.5-flash-preview-05-20",
-        "gemini-2.5-flash-preview-05-20",
+        judge_model,
+        baseline_model,
     )
 
     return unfinetuned_results, finetuned_results
@@ -125,7 +129,7 @@ def compare_performance(unfinetuned_results, finetuned_results):
         avg_unfinetuned = sum(unfinetuned_scores) / len(unfinetuned_scores)
         avg_finetuned = sum(finetuned_scores) / len(finetuned_scores)
 
-        print(f"\n--- Performance Comparison ---")
+        print("\n--- Performance Comparison ---")
         print(f"Unfinetuned model average score: {avg_unfinetuned:.2f}")
         print(f"Finetuned model average score: {avg_finetuned:.2f}")
         print(f"Improvement: {avg_finetuned - avg_unfinetuned:.2f}")
@@ -141,7 +145,6 @@ def compare_performance(unfinetuned_results, finetuned_results):
 
 
 def save_results(unfinetuned_results, finetuned_results, output_dir: str = "results"):
-    # Make output dir relative to script location  
     script_dir = Path(__file__).parent
     full_output_dir = script_dir / output_dir
     os.makedirs(full_output_dir, exist_ok=True)
@@ -155,57 +158,170 @@ def save_results(unfinetuned_results, finetuned_results, output_dir: str = "resu
     print(f"Results saved to {full_output_dir}/")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Fine-tune and evaluate Gemma3 model")
+
+    # Model configuration
+    parser.add_argument(
+        "--model",
+        default="gemma3_instruct_1b",
+        help="Model preset to use (default: gemma3_instruct_1b)",
+    )
+    parser.add_argument(
+        "--output-model",
+        default="finetuned_gemma3_1b",
+        help="Path to save finetuned model (default: finetuned_gemma3_1b)",
+    )
+
+    # Data paths
+    parser.add_argument(
+        "--train-data",
+        default="data/500_documented_commits.json",
+        help="Training data path (default: data/500_documented_commits.json)",
+    )
+    parser.add_argument(
+        "--eval-data",
+        default="data/so_jax_qa_pairs.json",
+        help="Evaluation data path (default: data/so_jax_qa_pairs.json)",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="results",
+        help="Output directory for results (default: results)",
+    )
+
+    # Training hyperparameters
+    parser.add_argument("--rank", type=int, default=16, help="LoRA rank (default: 16)")
+    parser.add_argument(
+        "--sequence-length",
+        type=int,
+        default=384,
+        help="Sequence length (default: 384)",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=6e-4,
+        help="Learning rate (default: 6e-4)",
+    )
+    parser.add_argument(
+        "--weight-decay", type=float, default=1e-3, help="Weight decay (default: 1e-3)"
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=8, help="Number of epochs (default: 8)"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=4, help="Batch size (default: 4)"
+    )
+
+    # Inference parameters
+    parser.add_argument(
+        "--test-prompt",
+        default="Fix self-attention bug",
+        help="Test prompt for inference (default: Fix self-attention bug)",
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=256,
+        help="Max length for pre-training inference (default: 256)",
+    )
+    parser.add_argument(
+        "--max-length-post",
+        type=int,
+        default=1024,
+        help="Max length for post-training inference (default: 1024)",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=2, help="Random seed for inference (default: 2)"
+    )
+
+    # Evaluation models
+    parser.add_argument(
+        "--eval-judge",
+        default="gemini-2.5-flash-preview-05-20",
+        help="Judge model for evaluation (default: gemini-2.5-flash-preview-05-20)",
+    )
+    parser.add_argument(
+        "--eval-baseline",
+        default="gemini-2.5-flash-preview-05-20",
+        help="Baseline model for evaluation (default: gemini-2.5-flash-preview-05-20)",
+    )
+
+    # Flags
+    parser.add_argument(
+        "--skip-training",
+        action="store_true",
+        help="Skip training and only evaluate existing models",
+    )
+    parser.add_argument(
+        "--skip-evaluation",
+        action="store_true",
+        help="Skip evaluation and only do training",
+    )
+
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     set_environment()
 
-    print("=== Loading unfinetuned model ===")
-    gemma_lm = load_model("gemma3_instruct_1b")
+    if not args.skip_training:
+        print("=== Loading unfinetuned model ===")
+        gemma_lm = load_model(args.model)
 
-    print("\n=== Testing inference before fine-tuning ===")
-    run_inference(gemma_lm, "Fix self-attention bug", max_length=256, seed=2)
+        print("\n=== Testing inference before fine-tuning ===")
+        run_inference(
+            gemma_lm, args.test_prompt, max_length=args.max_length, seed=args.seed
+        )
 
-    print("\n=== Loading training data ===")
-    data = load_data("data/500_documented_commits.json")
-    print(f"Loaded {len(data['prompts'])} training samples")
+        print("\n=== Loading training data ===")
+        data = load_data(args.train_data)
+        print(f"Loaded {len(data['prompts'])} training samples")
 
-    print("\n=== Starting fine-tuning ===")
-    fine_tune_model(
-        model=gemma_lm,
-        data=data,
-        rank=16,
-        sequence_length=384,
-        learning_rate=6e-4,
-        weight_decay=1e-3,
-        epochs=8,
-        batch_size=4,
-    )
+        print("\n=== Starting fine-tuning ===")
+        fine_tune_model(
+            model=gemma_lm,
+            data=data,
+            rank=args.rank,
+            sequence_length=args.sequence_length,
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+        )
 
-    print("\n=== Testing inference after fine-tuning ===")
-    run_inference(gemma_lm, "Fix self-attention bug", max_length=1024, seed=1)
+        print("\n=== Testing inference after fine-tuning ===")
+        run_inference(
+            gemma_lm, args.test_prompt, max_length=args.max_length_post, seed=1
+        )
 
-    finetuned_model_path = "finetuned_gemma3_1b"
-    print(f"\n=== Saving finetuned model to {finetuned_model_path} ===")
-    gemma_lm.save_weights(finetuned_model_path)
+        print(f"\n=== Saving finetuned model to {args.output_model} ===")
+        gemma_lm.save_weights(args.output_model)
 
-    print("\n=== Loading evaluation data ===")
-    script_dir = Path(__file__).parent
-    eval_data_path = script_dir / "data/so_jax_qa_pairs.json"
-    eval_data = LoadedDataset(
-        eval_data_path,
-        truncate_sample,
-    )
-    print(f"Loaded {len(eval_data)} evaluation samples")
+    if not args.skip_evaluation:
+        print("\n=== Loading evaluation data ===")
+        script_dir = Path(__file__).parent
+        eval_data_path = script_dir / args.eval_data
+        eval_data = LoadedDataset(
+            eval_data_path,
+            truncate_sample,
+        )
+        print(f"Loaded {len(eval_data)} evaluation samples")
 
-    print("\n=== Evaluating models ===")
-    unfinetuned_results, finetuned_results = evaluate_models(
-        eval_data,
-        "gemma3_instruct_1b",
-        finetuned_model_path,
-    )
+        print("\n=== Evaluating models ===")
+        unfinetuned_results, finetuned_results = evaluate_models(
+            eval_data,
+            args.model,
+            args.output_model,
+            args.eval_judge,
+            args.eval_baseline,
+        )
 
-    compare_performance(unfinetuned_results, finetuned_results)
+        compare_performance(unfinetuned_results, finetuned_results)
 
-    save_results(unfinetuned_results, finetuned_results)
+        save_results(unfinetuned_results, finetuned_results, args.output_dir)
 
     print("\n🎉 Complete! Finetuning and evaluation finished.")
 
