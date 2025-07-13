@@ -218,7 +218,7 @@ def evaluate_models(
 
         try:
             judge_response = generate_from_model(
-                judge_model, judge_prompt, verbose=False
+                judge_model, judge_prompt
             )
             finetuned_score, unfinetuned_score = extract_scores(judge_response)
         except Exception as e:
