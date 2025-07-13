@@ -12,7 +12,6 @@ from utils import LoadedDataset, truncate_sample
 
 
 def set_environment():
-    os.environ["KERAS_BACKEND"] = "tensorflow"
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.95"
 
 
