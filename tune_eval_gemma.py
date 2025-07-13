@@ -40,13 +40,13 @@ def run_inference(
 def load_data(file_path: str) -> Dict[str, List[str]]:
     prompts = []
     responses = []
-    
+
     script_dir = Path(__file__).parent
     full_path = script_dir / file_path
-    
+
     if not full_path.exists():
         raise FileNotFoundError(f"Data file not found: {full_path}")
-    
+
     with open(full_path) as file:
         data_list = json.load(file)
 
@@ -298,7 +298,8 @@ def main():
         )
 
         print(f"\n=== Saving finetuned model to {args.output_model} ===")
-        gemma_lm.save_weights(args.output_model)
+        output_path = args.output_model if args.output_model.endswith('.weights.h5') else f"{args.output_model}.weights.h5"
+        gemma_lm.save_weights(output_path)
 
     if not args.skip_evaluation:
         print("\n=== Loading evaluation data ===")
