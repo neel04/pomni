@@ -22,6 +22,53 @@ def set_environment():
     os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.95"
 
 
+def setup_distribution():
+    """Sets up the model distribution strategy for multi-device training."""
+    try:
+        devices = keras.distribution.list_devices()
+        num_devices = len(devices)
+    except Exception as e:
+        print(f"Warning: Could not list devices for distribution: {e}")
+        print("Proceeding with single-device training.")
+        return
+
+    if num_devices <= 1:
+        print("Only one device found. Skipping distributed setup.")
+        return
+
+    print(f"Found {num_devices} devices. Setting up distributed training.")
+
+    # Define the device mesh and layout map for model sharding
+    device_mesh = keras.distribution.DeviceMesh(
+        (1, num_devices),
+        ["batch", "model"],
+        devices=devices,
+    )
+
+    model_dim = "model"
+    layout_map = keras.distribution.LayoutMap(device_mesh)
+
+    # Shard token embeddings
+    layout_map["token_embedding/embeddings"] = (model_dim, None)
+    # Shard attention layers
+    layout_map["decoder_block.*attention.*(query|key|value).*kernel"] = (
+        model_dim,
+        None,
+        None,
+    )
+    layout_map["decoder_block.*attention_output.*kernel"] = (model_dim, None, None)
+    # Shard feed-forward layers
+    layout_map["decoder_block.*ffw_gating.*kernel"] = (None, model_dim)
+    layout_map["decoder_block.*ffw_linear.*kernel"] = (model_dim, None)
+
+    # Set the distribution strategy
+    model_parallel = keras.distribution.ModelParallel(
+        layout_map=layout_map, batch_dim_name="batch"
+    )
+    keras.distribution.set_distribution(model_parallel)
+    print("Keras distribution strategy set for multi-device training.")
+
+
 def load_model(preset: str) -> Gemma3CausalLM:
     model = Gemma3CausalLM.from_preset(preset)
     print(f"Loaded model: {preset}")
@@ -397,10 +444,12 @@ def parse_args():
 def main():
     args = parse_args()
     set_environment()
+    setup_distribution()
 
     if not args.skip_training:
         print("=== Loading unfinetuned model ===")
         gemma_lm = load_model(args.model)
+        print(gemma_lm.summary())
 
         print("\n=== Testing inference before fine-tuning ===")
         run_inference(
