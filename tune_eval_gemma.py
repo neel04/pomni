@@ -36,33 +36,13 @@ def run_inference(
     template: str = "Instruction:{instruction}\n\nResponse:{response}",
 ):
     prompt = template.format(instruction=instruction, response="")
-    if not hasattr(model, '_compiled_for_inference'):
+    if not hasattr(model, "_compiled_for_inference"):
         sampler = keras_hub.samplers.TopKSampler(k=5, seed=seed)
         model.compile(sampler=sampler)
         model._compiled_for_inference = True
     output = model.generate(prompt, max_length=max_length)
     print(f"Inference output: {output}")
     return output
-
-
-def load_data(file_path: str) -> Dict[str, List[str]]:
-    prompts = []
-    responses = []
-
-    script_dir = Path(__file__).parent
-    full_path = script_dir / file_path
-
-    if not full_path.exists():
-        raise FileNotFoundError(f"Data file not found: {full_path}")
-
-    with open(full_path) as file:
-        data_list = json.load(file)
-
-    for examples in data_list:
-        prompts.append(examples["text_input"])
-        responses.append(examples["output"])
-
-    return {"prompts": prompts, "responses": responses}
 
 
 def fine_tune_model(
@@ -134,9 +114,9 @@ def evaluate_model_locally(
     results = []
 
     print(f"Evaluating on {min(max_samples, len(eval_data))} samples...")
-    
+
     # Compile once at the start
-    if not hasattr(model, '_compiled_for_eval'):
+    if not hasattr(model, "_compiled_for_eval"):
         sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
         model.compile(sampler=sampler)
         model._compiled_for_eval = True
@@ -218,9 +198,7 @@ def evaluate_models(
         )
 
         try:
-            judge_response = generate_from_model(
-                judge_model, judge_prompt, is_str=True
-            )
+            judge_response = generate_from_model(judge_model, judge_prompt, is_str=True)
             finetuned_score, unfinetuned_score = extract_scores(judge_response)
         except Exception as e:
             print(f"Error getting judge response for sample {i}: {e}")
@@ -329,8 +307,8 @@ def parse_args():
     # Data paths
     parser.add_argument(
         "--train-data",
-        default="data/500_documented_commits.json",
-        help="Training data path (default: data/500_documented_commits.json)",
+        default="data/1000_documented_commits.json",
+        help="Comma-separated list of training data paths (default: data/1000_documented_commits.json)",
     )
     parser.add_argument(
         "--eval-data",
@@ -430,8 +408,36 @@ def main():
         )
 
         print("\n=== Loading training data ===")
-        data = load_data(args.train_data)
-        print(f"Loaded {len(data['prompts'])} training samples")
+
+        # Load and combine datasets
+        train_paths_str = [p.strip() for p in args.train_data.split(",")]
+        train_paths = []
+        for path_str in train_paths_str:
+            path = Path(path_str)
+            if not path.exists():
+                # Try prepending the default data directory
+                assumed_path = Path("data") / path_str
+                if assumed_path.exists():
+                    path = assumed_path
+            train_paths.append(path)
+
+        train_datasets = [
+            LoadedDataset(path, truncate_sample).flatten_on_key()
+            for path in train_paths
+        ]
+
+        # Combine all datasets into one
+        combined_dataset = train_datasets[0]
+        for ds in train_datasets[1:]:
+            combined_dataset += ds
+
+        data = {
+            "prompts": [sample["text_input"] for sample in combined_dataset],
+            "responses": [sample["output"] for sample in combined_dataset],
+        }
+        print(
+            f"Loaded and combined {len(data['prompts'])} training samples from {len(args.train_data)} files"
+        )
 
         print("\n=== Starting fine-tuning ===")
         fine_tune_model(
