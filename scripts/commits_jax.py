@@ -14,10 +14,10 @@ GITHUB_GRAPHQL_URL: str = "https://api.github.com/graphql"
 REPO_OWNER: str = "google"
 REPO_NAME: str = "jax"
 
-MAX_DIFF_CHANGES: int = 500  # Maximum additions/deletions for "good" commits
+MAX_DIFF_CHANGES: int = 1000  # Maximum additions/deletions for "good" commits
 MIN_COMMIT_MESSAGE_LENGTH: int = 10  # Minimum commit message length
-NUM_COMMITS_TO_FETCH: int = 500
-MAX_COMMITS_PER_PAGE: int = 50
+NUM_COMMITS_TO_FETCH: int = 1000
+MAX_COMMITS_PER_PAGE: int = 100
 
 OUTPUT_FILENAME: str = f"data/{NUM_COMMITS_TO_FETCH}_documented_commits.json"
 

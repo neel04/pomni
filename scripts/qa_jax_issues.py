@@ -13,7 +13,7 @@ GITHUB_GRAPHQL_URL: str = "https://api.github.com/graphql"
 REPO_OWNER: str = "google"
 REPO_NAME: str = "jax"
 
-NUM_ISSUES_TO_FETCH: int = 1000
+NUM_ISSUES_TO_FETCH: int = 4000
 MAX_ISSUES_PER_PAGE: int = 100
 NUM_COMMENTS_PER_ISSUE: int = 20
 

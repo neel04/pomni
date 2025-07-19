@@ -7,7 +7,7 @@ from typing import Any, Dict, List
 import nbformat
 from tqdm import tqdm
 
-JAX_REPO_PATH = "/Users/neel/Documents/work/pomni/jax"
+JAX_REPO_PATH = "/home/neel/Documents/work/pomni/jax"
 NOTEBOOKS_DIR = os.path.join(JAX_REPO_PATH, "docs/notebooks")
 OUTPUT_FILE = "data/jax_examples_qa_pairs.json"
 

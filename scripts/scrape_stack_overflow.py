@@ -8,14 +8,17 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 # --- Configuration ---
-assert load_dotenv(), "Couldn't load envvars"
+load_dotenv()  # Load environment variables from .env file
 
 STACK_API_URL: str = "https://api.stackexchange.com/2.3"
-TAG: str = "jax"
+STACK_API_KEY: Optional[str] = os.getenv(
+    "STACK_API_KEY"
+)  # Get API key from environment
+TAG: str = "keras"
 MIN_VOTES: int = 0
-MAX_QUESTIONS_TO_FETCH: int = 50  # Approx number of questions to fetch
-QUESTIONS_PER_PAGE: int = 25
-REQUEST_DELAY_SECONDS: float = 0.5  # Delay between API calls to be polite
+MAX_QUESTIONS_TO_FETCH: int = 1000  # Approx number of questions to fetch
+QUESTIONS_PER_PAGE: int = 100
+REQUEST_DELAY_SECONDS: float = 2  # Delay between API calls to be polite
 
 OUTPUT_DIR: str = "data"
 OUTPUT_FILENAME: str = os.path.join(OUTPUT_DIR, f"so_{TAG.lower()}_qa_pairs.json")
@@ -40,6 +43,13 @@ def make_stack_api_request(endpoint: str, params: Dict[str, Any]) -> Dict[str, A
 
     params["site"] = "stackoverflow"
 
+    # Add API key if available
+    if STACK_API_KEY:
+        params["key"] = STACK_API_KEY
+        print("Using API key (quota will be higher)")
+    else:
+        print("Warning: No API key found. Using anonymous quota (limited requests).")
+
     try:
         response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()  # Raises an HTTPError for bad responses (4XX or 5XX)
@@ -60,12 +70,21 @@ def make_stack_api_request(endpoint: str, params: Dict[str, Any]) -> Dict[str, A
             f"Stack API error {data.get('error_id')}: {data.get('error_name')} - {data.get('error_message')}"
         )
 
-    if "quota_remaining" in data and data["quota_remaining"] < 10:  # Be conservative
-        print(f"Warning: Low API quota remaining: {data['quota_remaining']}")
+    if "quota_remaining" in data:
+        quota_remaining = data["quota_remaining"]
+        if STACK_API_KEY:
+            # With API key, you get 10,000 requests per day
+            if quota_remaining < 100:
+                print(f"Warning: Low API quota remaining: {quota_remaining}")
+        else:
+            # Without API key, you get 300 requests per day
+            if quota_remaining < 10:
+                print(f"Warning: Low API quota remaining: {quota_remaining}")
+
     if data.get("backoff"):
         backoff_seconds = data["backoff"]
         print(f"API requested backoff for {backoff_seconds} seconds. Waiting...")
-        time.sleep(backoff_seconds + 1)  # Add a small buffer
+        time.sleep(backoff_seconds + 20)  # Add a small buffer
 
     return data
 
@@ -230,6 +249,14 @@ def main() -> None:
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
         print(f"Created output directory: {OUTPUT_DIR}")
+
+    # Check API key status
+    if STACK_API_KEY:
+        print("✓ API key loaded from environment variables")
+        print("Daily quota: 10,000 requests")
+    else:
+        print("⚠ No API key found - using anonymous quota (300 requests/day)")
+        print("To add an API key, create a .env file with: STACK_API_KEY=your_key_here")
 
     questions: List[Dict[str, Any]] = get_questions(
         TAG, MAX_QUESTIONS_TO_FETCH, QUESTIONS_PER_PAGE
