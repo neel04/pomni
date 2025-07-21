@@ -51,15 +51,11 @@ def setup_distribution():
     # Shard token embeddings
     layout_map["token_embedding/embeddings"] = (model_dim, None)
     # Shard attention layers
-    layout_map["decoder_block.*attention.*(query|key|value).*kernel"] = (
-        model_dim,
-        None,
-        None,
-    )
-    layout_map["decoder_block.*attention_output.*kernel"] = (model_dim, None, None)
-    # Shard feed-forward layers
-    layout_map["decoder_block.*ffw_gating.*kernel"] = (None, model_dim)
-    layout_map["decoder_block.*ffw_linear.*kernel"] = (model_dim, None)
+    # Regex to match against the query, key and value matrices in attention layers
+    layout_map["decoder_block.*attention.*(query|key|value)/kernel"] = ("model", None, None)
+    layout_map["decoder_block.*attention_output/kernel"] = ("model", None, None)
+    layout_map["decoder_block.*ffw_gating.*/kernel"] = (None, "model")
+    layout_map["decoder_block.*ffw_linear/kernel"] = ("model", None)
 
     # Set the distribution strategy
     model_parallel = keras.distribution.ModelParallel(
