@@ -501,14 +501,6 @@ def main():
             gemma_lm, args.test_prompt, max_length=args.max_length_post, seed=1
         )
 
-        print(f"\n=== Saving finetuned model to {args.output_model} ===")
-        output_path = (
-            args.output_model
-            if args.output_model.endswith(".weights.h5")
-            else f"{args.output_model}.weights.h5"
-        )
-        gemma_lm.save_weights(output_path)
-
     if not args.skip_evaluation:
         print("\n=== Loading evaluation data ===")
         script_dir = Path(__file__).parent
@@ -532,6 +524,15 @@ def main():
         compare_performance(results)
 
         save_results(results, args.output_dir)
+
+    print(f"\n=== Saving finetuned model to {args.output_model} ===")
+
+    output_path = (
+        args.output_model
+        if args.output_model.endswith(".weights.h5")
+        else f"{args.output_model}.weights.h5"
+    )
+    gemma_lm.save_weights(output_path)
 
     print("\n🎉 Complete! Finetuning and evaluation finished.")
 
