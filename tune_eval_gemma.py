@@ -190,78 +190,6 @@ def evaluate_model_locally(
     return results
 
 
-def evaluate_models(
-    eval_data: LoadedDataset,
-    unfinetuned_model_name: str,
-    finetuned_model_name: str,
-    judge_model_name: str,
-    baseline_model: str,
-    max_samples: int = 20,
-):
-    """Evaluate both unfinetuned and finetuned models locally, then judge with Gemini."""
-    # Generate responses from both models
-    print("\n--- Evaluating unfinetuned model ---")
-    unfinetuned_model = load_model(unfinetuned_model_name)
-    unfinetuned_outputs = evaluate_model_locally(
-        unfinetuned_model, eval_data, max_samples
-    )
-
-    print("\n--- Loading finetuned model ---")
-    finetuned_model = load_model(unfinetuned_model_name)
-
-    # Load the finetuned weights
-    weights_path = (
-        finetuned_model_name
-        if finetuned_model_name.endswith(".weights.h5")
-        else f"{finetuned_model_name}.weights.h5"
-    )
-    try:
-        finetuned_model.load_weights(weights_path)
-        print(f"Loaded finetuned weights from {weights_path}")
-    except Exception as e:
-        print(f"Warning: Could not load finetuned weights: {e}")
-        print("Using unfinetuned model for comparison")
-
-    print("\n--- Evaluating finetuned model ---")
-    finetuned_outputs = evaluate_model_locally(finetuned_model, eval_data, max_samples)
-
-    # Now judge the outputs using Gemini
-    print(f"\n--- Judging outputs with {judge_model_name} ---")
-    judge_model = GenerativeModel(judge_model_name)
-
-    results = []
-    for i, sample in enumerate(eval_data[:max_samples]):
-        question = sample["text_input"]
-        unfinetuned_answer = unfinetuned_outputs[i]
-        finetuned_answer = finetuned_outputs[i]
-
-        # Create judge prompt
-        judge_prompt = generate_eval_template(
-            question, finetuned_answer, unfinetuned_answer
-        )
-
-        try:
-            judge_response = generate_from_model(judge_model, judge_prompt, is_str=True)
-            finetuned_score, unfinetuned_score = extract_scores(judge_response)
-        except Exception as e:
-            print(f"Error getting judge response for sample {i}: {e}")
-            judge_response = f"Error: {str(e)}"
-            finetuned_score, unfinetuned_score = None, None
-
-        result = {
-            "question": question,
-            "finetuned_output": finetuned_answer,
-            "unfinetuned_output": unfinetuned_answer,
-            "finetuned_score": finetuned_score,
-            "unfinetuned_score": unfinetuned_score,
-            "judge_response": judge_response,
-        }
-        results.append(result)
-
-        if i % 5 == 0:
-            print(f"Judged {i + 1}/{max_samples} samples")
-
-    return results
 
 
 def compare_performance(results):
@@ -442,6 +370,11 @@ def main():
     set_environment()
     setup_distribution()
 
+    # Initialize variables for evaluation results
+    unfinetuned_outputs = None
+    finetuned_outputs = None
+    eval_data = None
+
     if not args.skip_training:
         print("=== Loading unfinetuned model ===")
         gemma_lm = load_model(args.model)
@@ -451,6 +384,22 @@ def main():
         run_inference(
             gemma_lm, args.test_prompt, max_length=args.max_length, seed=args.seed
         )
+
+        # Evaluate unfinetuned model immediately after loading if evaluation is enabled
+        if not args.skip_evaluation:
+            print("\n=== Loading evaluation data ===")
+            script_dir = Path(__file__).parent
+            eval_data_path = script_dir / args.eval_data
+            eval_data = LoadedDataset(
+                eval_data_path,
+                truncate_sample,
+            )
+            print(f"Loaded {len(eval_data)} evaluation samples")
+
+            print("\n=== Evaluating unfinetuned model (caching results) ===")
+            unfinetuned_outputs = evaluate_model_locally(
+                gemma_lm, eval_data, 20  # max_samples
+            )
 
         print("\n=== Loading training data ===")
 
@@ -501,38 +450,62 @@ def main():
             gemma_lm, args.test_prompt, max_length=args.max_length_post, seed=1
         )
 
-    if not args.skip_evaluation:
-        print("\n=== Loading evaluation data ===")
-        script_dir = Path(__file__).parent
-        eval_data_path = script_dir / args.eval_data
-        eval_data = LoadedDataset(
-            eval_data_path,
-            truncate_sample,
-        )
-        print(f"Loaded {len(eval_data)} evaluation samples")
+        # Evaluate finetuned model immediately after training if evaluation is enabled
+        if not args.skip_evaluation and eval_data is not None:
+            print("\n=== Evaluating finetuned model ===")
+            finetuned_outputs = evaluate_model_locally(
+                gemma_lm, eval_data, 20  # max_samples
+            )
 
-        print("\n=== Evaluating models ===")
-        results = evaluate_models(
-            eval_data,
-            args.model,
-            args.output_model,
-            args.eval_judge,
-            args.eval_baseline,
-            20,  # max_samples
-        )
+    # Compare results using judge if we have both unfinetuned and finetuned outputs
+    if not args.skip_evaluation and unfinetuned_outputs is not None and finetuned_outputs is not None:
+        print("\n=== Judging outputs with Gemini ===")
+        judge_model = GenerativeModel(args.eval_judge)
+        
+        results = []
+        for i, sample in enumerate(eval_data[:20]):  # max_samples
+            question = sample["text_input"]
+            unfinetuned_answer = unfinetuned_outputs[i]
+            finetuned_answer = finetuned_outputs[i]
+
+            # Create judge prompt
+            judge_prompt = generate_eval_template(
+                question, finetuned_answer, unfinetuned_answer
+            )
+
+            try:
+                judge_response = generate_from_model(judge_model, judge_prompt, is_str=True)
+                finetuned_score, unfinetuned_score = extract_scores(judge_response)
+            except Exception as e:
+                print(f"Error getting judge response for sample {i}: {e}")
+                judge_response = f"Error: {str(e)}"
+                finetuned_score, unfinetuned_score = None, None
+
+            result = {
+                "question": question,
+                "finetuned_output": finetuned_answer,
+                "unfinetuned_output": unfinetuned_answer,
+                "finetuned_score": finetuned_score,
+                "unfinetuned_score": unfinetuned_score,
+                "judge_response": judge_response,
+            }
+            results.append(result)
+
+            if i % 5 == 0:
+                print(f"Judged {i + 1}/20 samples")
 
         compare_performance(results)
-
         save_results(results, args.output_dir)
 
-    print(f"\n=== Saving finetuned model to {args.output_model} ===")
-
-    output_path = (
-        args.output_model
-        if args.output_model.endswith(".weights.h5")
-        else f"{args.output_model}.weights.h5"
-    )
-    gemma_lm.save_weights(output_path)
+    # Save model weights only if we did training
+    if not args.skip_training:
+        print(f"\n=== Saving finetuned model to {args.output_model} ===")
+        output_path = (
+            args.output_model
+            if args.output_model.endswith(".weights.h5")
+            else f"{args.output_model}.weights.h5"
+        )
+        gemma_lm.save_weights(output_path)
 
     print("\n🎉 Complete! Finetuning and evaluation finished.")
 
