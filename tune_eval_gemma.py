@@ -67,6 +67,7 @@ def setup_distribution():
 
 def load_model(preset: str) -> Gemma3CausalLM:
     model = Gemma3CausalLM.from_preset(preset)
+    model.quantize("int8")
     print(f"Loaded model: {preset}")
     return model
 
