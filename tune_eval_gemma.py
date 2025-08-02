@@ -2,6 +2,9 @@ import argparse
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Dict, List
 
@@ -16,6 +19,92 @@ from utils import LoadedDataset, generate_from_model, truncate_sample
 
 # Load environment variables for API access
 load_dotenv()
+
+
+def create_ramdisk(size_gb: int = 20) -> str:
+    """Create a ramdisk for temporary model storage. Returns the mount point."""
+    try:
+        # Try to create ramdisk in /dev/shm (shared memory filesystem)
+        # This is typically available without sudo and mounted as tmpfs
+        shm_path = "/dev/shm"
+        if os.path.exists(shm_path) and os.access(shm_path, os.W_OK):
+            mount_point = tempfile.mkdtemp(prefix="ramdisk_", dir=shm_path)
+            print(f"Created ramdisk directory at {mount_point} (using /dev/shm)")
+            return mount_point
+        else:
+            raise FileNotFoundError("/dev/shm not available or not writable")
+            
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"Failed to create ramdisk: {e}")
+        # Fallback to regular temp directory
+        print("Falling back to regular temporary directory")
+        return tempfile.mkdtemp(prefix="weights_temp_")
+
+
+def cleanup_ramdisk(mount_point: str):
+    """Clean up the ramdisk."""
+    try:
+        # Simply remove the directory since we're using /dev/shm
+        if os.path.exists(mount_point):
+            shutil.rmtree(mount_point)
+        print(f"Cleaned up ramdisk at {mount_point}")
+        
+    except Exception as e:
+        print(f"Warning: Failed to cleanup ramdisk: {e}")
+        # Try to remove directory anyway
+        if os.path.exists(mount_point):
+            shutil.rmtree(mount_point, ignore_errors=True)
+
+
+def save_model_with_compression(model, output_path: str, ramdisk_size_gb: int = 20):
+    """Save model weights using ramdisk, compression, and final move."""
+    print(f"Saving model weights with ramdisk compression to {output_path}")
+
+    # Create ramdisk
+    ramdisk_path = create_ramdisk(ramdisk_size_gb)
+
+    try:
+        # Save to ramdisk first
+        temp_weights_path = os.path.join(ramdisk_path, "temp_model.weights.h5")
+        print(f"Saving weights to ramdisk: {temp_weights_path}")
+        model.save_weights(temp_weights_path)
+
+        # Compress the weights file
+        compressed_path = os.path.join(ramdisk_path, "temp_model.weights.h5.gz")
+        print(f"Compressing weights: {compressed_path}")
+
+        import gzip
+
+        with open(temp_weights_path, "rb") as f_in:
+            with gzip.open(compressed_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+        # Determine final output path
+        if output_path.endswith(".weights.h5"):
+            final_compressed_path = output_path + ".gz"
+        else:
+            final_compressed_path = f"{output_path}.weights.h5.gz"
+
+        # Move compressed file to final location
+        print(f"Moving compressed weights to final location: {final_compressed_path}")
+        shutil.move(compressed_path, final_compressed_path)
+
+        # Get file sizes for reporting
+        original_size = os.path.getsize(temp_weights_path)
+        compressed_size = os.path.getsize(final_compressed_path)
+        compression_ratio = (1 - compressed_size / original_size) * 100
+
+        print("✅ Model weights saved successfully!")
+        print(f"   Original size: {original_size / (1024**3):.2f} GB")
+        print(f"   Compressed size: {compressed_size / (1024**3):.2f} GB")
+        print(f"   Compression ratio: {compression_ratio:.1f}%")
+        print(f"   Final location: {final_compressed_path}")
+
+        return final_compressed_path
+
+    finally:
+        # Always cleanup ramdisk
+        cleanup_ramdisk(ramdisk_path)
 
 
 def set_environment():
@@ -52,7 +141,11 @@ def setup_distribution():
     layout_map["token_embedding/embeddings"] = (model_dim, None)
     # Shard attention layers
     # Regex to match against the query, key and value matrices in attention layers
-    layout_map["decoder_block.*attention.*(query|key|value)/kernel"] = ("model", None, None)
+    layout_map["decoder_block.*attention.*(query|key|value)/kernel"] = (
+        "model",
+        None,
+        None,
+    )
     layout_map["decoder_block.*attention_output/kernel"] = ("model", None, None)
     layout_map["decoder_block.*ffw_gating.*/kernel"] = (None, "model")
     layout_map["decoder_block.*ffw_linear/kernel"] = ("model", None)
@@ -67,7 +160,6 @@ def setup_distribution():
 
 def load_model(preset: str) -> Gemma3CausalLM:
     model = Gemma3CausalLM.from_preset(preset)
-    model.quantize("int8")
     print(f"Loaded model: {preset}")
     return model
 
@@ -189,8 +281,6 @@ def evaluate_model_locally(
             print(f"Completed {i + 1}/{min(max_samples, len(eval_data))} samples")
 
     return results
-
-
 
 
 def compare_performance(results):
@@ -399,7 +489,9 @@ def main():
 
             print("\n=== Evaluating unfinetuned model (caching results) ===")
             unfinetuned_outputs = evaluate_model_locally(
-                gemma_lm, eval_data, 20  # max_samples
+                gemma_lm,
+                eval_data,
+                20,  # max_samples
             )
 
         print("\n=== Loading training data ===")
@@ -455,14 +547,20 @@ def main():
         if not args.skip_evaluation and eval_data is not None:
             print("\n=== Evaluating finetuned model ===")
             finetuned_outputs = evaluate_model_locally(
-                gemma_lm, eval_data, 20  # max_samples
+                gemma_lm,
+                eval_data,
+                20,  # max_samples
             )
 
     # Compare results using judge if we have both unfinetuned and finetuned outputs
-    if not args.skip_evaluation and unfinetuned_outputs is not None and finetuned_outputs is not None:
+    if (
+        not args.skip_evaluation
+        and unfinetuned_outputs is not None
+        and finetuned_outputs is not None
+    ):
         print("\n=== Judging outputs with Gemini ===")
         judge_model = GenerativeModel(args.eval_judge)
-        
+
         results = []
         for i, sample in enumerate(eval_data[:20]):  # max_samples
             question = sample["text_input"]
@@ -475,7 +573,9 @@ def main():
             )
 
             try:
-                judge_response = generate_from_model(judge_model, judge_prompt, is_str=True)
+                judge_response = generate_from_model(
+                    judge_model, judge_prompt, is_str=True
+                )
                 finetuned_score, unfinetuned_score = extract_scores(judge_response)
             except Exception as e:
                 print(f"Error getting judge response for sample {i}: {e}")
@@ -506,7 +606,9 @@ def main():
             if args.output_model.endswith(".weights.h5")
             else f"{args.output_model}.weights.h5"
         )
-        gemma_lm.save_weights(output_path)
+
+        # Use ramdisk compression method
+        save_model_with_compression(gemma_lm, output_path)
 
     print("\n🎉 Complete! Finetuning and evaluation finished.")
 
