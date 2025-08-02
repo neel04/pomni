@@ -1,0 +1,14 @@
+streamlit
+-e git+https://github.com/google-deepmind/keras-nlp.git#egg=keras-nlp
+-e git+https://github.com/keras-team/keras-hub.git#egg=keras-hub
+-e git+https://github.com/keras-team/keras.git#egg=keras
+google-generativeai>=0.8.5
+python-dotenv>=0.9.9
+pandas>=2.3.0
+requests>=2.32.3
+vertexai>=1.71.1
+ipykernel>=6.29.5
+jupyter>=1.1.1
+nbformat>=5.10.4
+patdb>=0.1.0
+pylsp-rope>=0.1.17
