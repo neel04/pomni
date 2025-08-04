@@ -16,8 +16,10 @@ dependencies = [
     "patdb>=0.1.0",
     "pylsp-rope>=0.1.17",
     "requests>=2.32.3",
+    "sentencepiece>=0.2.0",
     "streamlit>=1.47.1",
     "vertexai>=1.71.1",
+    "watchdog>=6.0.0",
 ]
 
 [dependency-groups]
