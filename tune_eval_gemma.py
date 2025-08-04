@@ -3,7 +3,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, List
@@ -21,56 +20,55 @@ from utils import LoadedDataset, generate_from_model, truncate_sample
 load_dotenv()
 
 
-def create_ramdisk(size_gb: int = 20) -> str:
-    """Create a ramdisk for temporary model storage. Returns the mount point."""
+def create_temp_dir() -> str:
+    """Create a temporary directory for model storage. Returns the temp path."""
     try:
-        # Try to create ramdisk in /dev/shm (shared memory filesystem)
-        # This is typically available without sudo and mounted as tmpfs
-        shm_path = "/dev/shm"
-        if os.path.exists(shm_path) and os.access(shm_path, os.W_OK):
-            mount_point = tempfile.mkdtemp(prefix="ramdisk_", dir=shm_path)
-            print(f"Created ramdisk directory at {mount_point} (using /dev/shm)")
-            return mount_point
+        # Use /kaggle/temp if it exists, otherwise fall back to system temp
+        kaggle_temp = "/kaggle/temp"
+        if os.path.exists(kaggle_temp) and os.access(kaggle_temp, os.W_OK):
+            temp_dir = tempfile.mkdtemp(prefix="weights_temp_", dir=kaggle_temp)
+            print(f"Created temporary directory at {temp_dir} (using /kaggle/temp)")
+            return temp_dir
         else:
-            raise FileNotFoundError("/dev/shm not available or not writable")
-            
-    except (subprocess.CalledProcessError, FileNotFoundError) as e:
-        print(f"Failed to create ramdisk: {e}")
-        # Fallback to regular temp directory
-        print("Falling back to regular temporary directory")
+            temp_dir = tempfile.mkdtemp(prefix="weights_temp_")
+            print(f"Created temporary directory at {temp_dir} (using system temp)")
+            return temp_dir
+
+    except Exception as e:
+        print(f"Failed to create temp directory: {e}")
+        # Final fallback to system temp
         return tempfile.mkdtemp(prefix="weights_temp_")
 
 
-def cleanup_ramdisk(mount_point: str):
-    """Clean up the ramdisk."""
+def cleanup_temp_dir(temp_path: str):
+    """Clean up the temporary directory."""
     try:
-        # Simply remove the directory since we're using /dev/shm
-        if os.path.exists(mount_point):
-            shutil.rmtree(mount_point)
-        print(f"Cleaned up ramdisk at {mount_point}")
-        
+        if os.path.exists(temp_path):
+            shutil.rmtree(temp_path)
+        print(f"Cleaned up temporary directory at {temp_path}")
+
     except Exception as e:
-        print(f"Warning: Failed to cleanup ramdisk: {e}")
+        print(f"Warning: Failed to cleanup temp directory: {e}")
         # Try to remove directory anyway
-        if os.path.exists(mount_point):
-            shutil.rmtree(mount_point, ignore_errors=True)
+        if os.path.exists(temp_path):
+            shutil.rmtree(temp_path, ignore_errors=True)
 
 
-def save_model_with_compression(model, output_path: str, ramdisk_size_gb: int = 20):
-    """Save model weights using ramdisk, compression, and final move."""
-    print(f"Saving model weights with ramdisk compression to {output_path}")
+def save_model_with_compression(model, output_path: str):
+    """Save model weights using temp directory, compression, and final move."""
+    print(f"Saving model weights with compression to {output_path}")
 
-    # Create ramdisk
-    ramdisk_path = create_ramdisk(ramdisk_size_gb)
+    # Create temp directory
+    temp_path = create_temp_dir()
 
     try:
-        # Save to ramdisk first
-        temp_weights_path = os.path.join(ramdisk_path, "temp_model.weights.h5")
-        print(f"Saving weights to ramdisk: {temp_weights_path}")
+        # Save to temp directory first
+        temp_weights_path = os.path.join(temp_path, "temp_model.weights.h5")
+        print(f"Saving weights to temp directory: {temp_weights_path}")
         model.save_weights(temp_weights_path)
 
         # Compress the weights file
-        compressed_path = os.path.join(ramdisk_path, "temp_model.weights.h5.gz")
+        compressed_path = os.path.join(temp_path, "temp_model.weights.h5.gz")
         print(f"Compressing weights: {compressed_path}")
 
         import gzip
@@ -103,8 +101,8 @@ def save_model_with_compression(model, output_path: str, ramdisk_size_gb: int = 
         return final_compressed_path
 
     finally:
-        # Always cleanup ramdisk
-        cleanup_ramdisk(ramdisk_path)
+        # Always cleanup temp directory
+        cleanup_temp_dir(temp_path)
 
 
 def set_environment():
