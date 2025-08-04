@@ -45,7 +45,7 @@ def download_weights(url, dest):
 def load_gemma_model():
     """Loads the fine-tuned Gemma model and caches it."""
     preset = "gemma3_instruct_1b"
-    weights_path = "finetuned_gemma3_1b.weights.h5"
+    weights_path = "/Users/neel/Downloads/finetuned_gemma3_1b.weights.h5"
 
     # FIX: Static URL
     weights_url = "https://filebin.net/gmmu2zultifcjlgi/finetuned_gemma3_1b.weights.h5"
@@ -58,7 +58,7 @@ def load_gemma_model():
             )
             st.stop()
 
-    model = Gemma3CausalLM.from_preset(preset)
+    model = Gemma3CausalLM.from_preset(preset, dtype="bfloat16")
 
     if os.path.exists(weights_path):
         try:
@@ -69,8 +69,6 @@ def load_gemma_model():
             st.info("Proceeding with the base model.")
     else:
         st.warning("Fine-tuned weights not found. Using the base model.")
-
-    model.quantize("int8")
 
     sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
     model.compile(sampler=sampler)
@@ -102,6 +100,19 @@ if prompt := st.chat_input("What is up?"):
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response = gemma_model.generate(prompt, max_length=1024)
-            st.markdown(response)
-    st.session_state.chat_history.append({"role": "assistant", "content": response})
+            # Add system prompt to make the model nice, polite and helpful
+            system_prompt = "You are a helpful, polite, and friendly AI assistant. Please provide clear, concise, and accurate responses while maintaining a warm and respectful tone."
+            full_prompt = f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:"
+            response = gemma_model.generate(full_prompt, max_length=1024)
+
+            # Extract just the assistant's response (remove the prompt part)
+            if full_prompt in response:
+                clean_response = response[len(full_prompt) :].strip()
+            else:
+                clean_response = response.strip()
+
+            st.markdown(clean_response)
+    st.session_state.chat_history.append({
+        "role": "assistant",
+        "content": clean_response,
+    })
