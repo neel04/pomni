@@ -1,4 +1,5 @@
 import argparse
+import gzip
 import json
 import os
 import re
@@ -67,15 +68,30 @@ def save_model_with_compression(model, output_path: str):
         print(f"Saving weights to temp directory: {temp_weights_path}")
         model.save_weights(temp_weights_path)
 
+        # Check if file was saved successfully
+        if not os.path.exists(temp_weights_path):
+            raise FileNotFoundError(f"Failed to save weights to {temp_weights_path}")
+
+        original_size = os.path.getsize(temp_weights_path)
+        print(f"Original weights file size: {original_size / (1024**3):.2f} GB")
+
         # Compress the weights file
         compressed_path = os.path.join(temp_path, "temp_model.weights.h5.gz")
         print(f"Compressing weights: {compressed_path}")
 
-        import gzip
-
+        # Use buffered compression for large files
+        chunk_size = 1024 * 1024  # 1MB chunks
         with open(temp_weights_path, "rb") as f_in:
             with gzip.open(compressed_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
+                while True:
+                    chunk = f_in.read(chunk_size)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+
+        print(
+            f"Compression completed. Compressed file size: {os.path.getsize(compressed_path) / (1024**3):.2f} GB"
+        )
 
         # Determine final output path
         if output_path.endswith(".weights.h5"):
@@ -87,8 +103,13 @@ def save_model_with_compression(model, output_path: str):
         print(f"Moving compressed weights to final location: {final_compressed_path}")
         shutil.move(compressed_path, final_compressed_path)
 
+        # Verify the move was successful
+        if not os.path.exists(final_compressed_path):
+            raise FileNotFoundError(
+                f"Failed to move compressed file to {final_compressed_path}"
+            )
+
         # Get file sizes for reporting
-        original_size = os.path.getsize(temp_weights_path)
         compressed_size = os.path.getsize(final_compressed_path)
         compression_ratio = (1 - compressed_size / original_size) * 100
 
@@ -100,8 +121,12 @@ def save_model_with_compression(model, output_path: str):
 
         return final_compressed_path
 
+    except Exception as e:
+        print(f"❌ Error during model saving: {e}")
+        raise
     finally:
         # Always cleanup temp directory
+        print("Cleaning up temporary directory...")
         cleanup_temp_dir(temp_path)
 
 
