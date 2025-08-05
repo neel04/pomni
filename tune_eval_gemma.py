@@ -1,10 +1,10 @@
 import argparse
-import gzip
 import json
 import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Dict, List
 
@@ -16,6 +16,17 @@ from keras_hub.models import Gemma3CausalLM
 from tqdm import tqdm
 
 from utils import LoadedDataset, generate_from_model, truncate_sample
+
+# Try to import lz4, fall back to gzip if not available
+try:
+    import lz4.frame
+
+    HAS_LZ4 = True
+except ImportError:
+    import gzip
+
+    HAS_LZ4 = False
+    print("Warning: lz4 not installed. Using gzip (slower)")
 
 # Load environment variables for API access
 load_dotenv()
@@ -59,14 +70,29 @@ def save_model_with_compression(model, output_path: str):
     """Save model weights using temp directory, compression, and final move."""
     print(f"Saving model weights with compression to {output_path}")
 
+    # Decide on compression method and extension
+    if HAS_LZ4:
+        compression_method = "lz4"
+        compression_ext = ".lz4"
+        print("Using LZ4 compression (fastest)")
+    else:
+        compression_method = "gzip"
+        compression_ext = ".gz"
+        print("Using gzip compression (slower)")
+
     # Create temp directory
     temp_path = create_temp_dir()
+    start_time = time.time()
 
     try:
         # Save to temp directory first
         temp_weights_path = os.path.join(temp_path, "temp_model.weights.h5")
         print(f"Saving weights to temp directory: {temp_weights_path}")
+
+        save_start = time.time()
         model.save_weights(temp_weights_path)
+        save_time = time.time() - save_start
+        print(f"Weights saved in {save_time:.1f} seconds")
 
         # Check if file was saved successfully
         if not os.path.exists(temp_weights_path):
@@ -76,57 +102,164 @@ def save_model_with_compression(model, output_path: str):
         print(f"Original weights file size: {original_size / (1024**3):.2f} GB")
 
         # Compress the weights file
-        compressed_path = os.path.join(temp_path, "temp_model.weights.h5.gz")
-        print(f"Compressing weights: {compressed_path}")
-
-        # Use buffered compression for large files
-        chunk_size = 1024 * 1024  # 1MB chunks
-        with open(temp_weights_path, "rb") as f_in:
-            with gzip.open(compressed_path, "wb") as f_out:
-                while True:
-                    chunk = f_in.read(chunk_size)
-                    if not chunk:
-                        break
-                    f_out.write(chunk)
-
-        print(
-            f"Compression completed. Compressed file size: {os.path.getsize(compressed_path) / (1024**3):.2f} GB"
+        compressed_path = os.path.join(
+            temp_path, f"temp_model.weights.h5{compression_ext}"
         )
+        print(f"Compressing weights using {compression_method}...")
+
+        # Use appropriate chunk size based on file size
+        chunk_size = min(
+            64 * 1024 * 1024, max(8 * 1024 * 1024, original_size // 1000)
+        )  # 8-64MB chunks
+        print(f"Using chunk size: {chunk_size / (1024 * 1024):.1f} MB")
+
+        compress_start = time.time()
+        bytes_written = 0
+
+        with open(temp_weights_path, "rb") as f_in:
+            if HAS_LZ4:
+                # LZ4 compression - extremely fast
+                # compression_level: 0-16, where 0 is fastest, 16 is best compression
+                # We use 3 for a good balance (very fast, decent compression)
+                with lz4.frame.open(
+                    compressed_path,
+                    "wb",
+                    compression_level=3,
+                    content_checksum=True,
+                    block_size=lz4.frame.BLOCKSIZE_MAX4MB,
+                ) as f_out:
+                    with tqdm(
+                        total=original_size,
+                        unit="B",
+                        unit_scale=True,
+                        desc="Compressing (LZ4)",
+                        ncols=100,
+                    ) as pbar:
+                        while True:
+                            chunk = f_in.read(chunk_size)
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
+                            bytes_written += len(chunk)
+                            pbar.update(len(chunk))
+            else:
+                # Gzip compression - slower but more compatible
+                # compression level 1 is fastest, 9 is best compression
+                with gzip.open(compressed_path, "wb", compresslevel=1) as f_out:
+                    with tqdm(
+                        total=original_size,
+                        unit="B",
+                        unit_scale=True,
+                        desc="Compressing (gzip)",
+                        ncols=100,
+                    ) as pbar:
+                        while True:
+                            chunk = f_in.read(chunk_size)
+                            if not chunk:
+                                break
+                            f_out.write(chunk)
+                            bytes_written += len(chunk)
+                            pbar.update(len(chunk))
+
+        compress_time = time.time() - compress_start
+        print(
+            f"Compression completed in {compress_time:.1f} seconds ({original_size / compress_time / (1024**3):.2f} GB/s)"
+        )
+
+        # Verify compressed file exists and get size
+        if not os.path.exists(compressed_path):
+            raise FileNotFoundError(
+                f"Compression failed - file not found: {compressed_path}"
+            )
+
+        compressed_size = os.path.getsize(compressed_path)
+        compression_ratio = (1 - compressed_size / original_size) * 100
+        print(
+            f"Compressed size: {compressed_size / (1024**3):.2f} GB (saved {compression_ratio:.1f}%)"
+        )
+
+        # Delete original file to free up space before moving
+        print("Removing temporary uncompressed file...")
+        os.remove(temp_weights_path)
 
         # Determine final output path
         if output_path.endswith(".weights.h5"):
-            final_compressed_path = output_path + ".gz"
+            final_compressed_path = output_path + compression_ext
         else:
-            final_compressed_path = f"{output_path}.weights.h5.gz"
+            final_compressed_path = f"{output_path}.weights.h5{compression_ext}"
+
+        # Ensure the output directory exists
+        output_dir = os.path.dirname(final_compressed_path)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir, exist_ok=True)
 
         # Move compressed file to final location
-        print(f"Moving compressed weights to final location: {final_compressed_path}")
-        shutil.move(compressed_path, final_compressed_path)
+        print(f"Moving compressed file to: {final_compressed_path}")
 
-        # Verify the move was successful
+        move_start = time.time()
+
+        # If on same filesystem, use rename (instant), otherwise copy
+        try:
+            os.rename(compressed_path, final_compressed_path)
+            print("File moved instantly (same filesystem)")
+        except OSError:
+            # Different filesystem, need to copy
+            with tqdm(
+                total=compressed_size,
+                unit="B",
+                unit_scale=True,
+                desc="Moving file",
+                ncols=100,
+            ) as pbar:
+                with open(compressed_path, "rb") as src:
+                    with open(final_compressed_path, "wb") as dst:
+                        while True:
+                            chunk = src.read(chunk_size)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                            pbar.update(len(chunk))
+
+            # Remove the source file after successful copy
+            os.remove(compressed_path)
+
+        move_time = time.time() - move_start
+        if move_time > 1:
+            print(f"File moved in {move_time:.1f} seconds")
+
+        # Verify the final file exists
         if not os.path.exists(final_compressed_path):
             raise FileNotFoundError(
-                f"Failed to move compressed file to {final_compressed_path}"
+                f"Failed to create final compressed file at {final_compressed_path}"
             )
 
-        # Get file sizes for reporting
-        compressed_size = os.path.getsize(final_compressed_path)
-        compression_ratio = (1 - compressed_size / original_size) * 100
+        # Final statistics
+        total_time = time.time() - start_time
+        final_size = os.path.getsize(final_compressed_path)
 
-        print("✅ Model weights saved successfully!")
+        print("\n✅ Model weights saved successfully!")
         print(f"   Original size: {original_size / (1024**3):.2f} GB")
-        print(f"   Compressed size: {compressed_size / (1024**3):.2f} GB")
+        print(f"   Compressed size: {final_size / (1024**3):.2f} GB")
         print(f"   Compression ratio: {compression_ratio:.1f}%")
+        print(f"   Compression method: {compression_method}")
+        print(f"   Total time: {total_time:.1f} seconds")
+        print(f"   Throughput: {original_size / total_time / (1024**2):.1f} MB/s")
         print(f"   Final location: {final_compressed_path}")
 
         return final_compressed_path
 
+    except KeyboardInterrupt:
+        print("\n⚠️  Operation interrupted by user")
+        raise
     except Exception as e:
         print(f"❌ Error during model saving: {e}")
+        import traceback
+
+        traceback.print_exc()
         raise
     finally:
         # Always cleanup temp directory
-        print("Cleaning up temporary directory...")
+        print("\nCleaning up temporary directory...")
         cleanup_temp_dir(temp_path)
 
 
