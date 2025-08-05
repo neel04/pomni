@@ -35,11 +35,11 @@ load_dotenv()
 def create_temp_dir() -> str:
     """Create a temporary directory for model storage. Returns the temp path."""
     try:
-        # Use /kaggle/temp if it exists, otherwise fall back to system temp
-        kaggle_temp = "/kaggle/temp"
-        if os.path.exists(kaggle_temp) and os.access(kaggle_temp, os.W_OK):
-            temp_dir = tempfile.mkdtemp(prefix="weights_temp_", dir=kaggle_temp)
-            print(f"Created temporary directory at {temp_dir} (using /kaggle/temp)")
+        # Use ramdisk (/dev/shm) if it exists, otherwise fall back to system temp
+        ramdisk_path = "/dev/shm"
+        if os.path.exists(ramdisk_path) and os.access(ramdisk_path, os.W_OK):
+            temp_dir = tempfile.mkdtemp(prefix="weights_temp_", dir=ramdisk_path)
+            print(f"Created temporary directory at {temp_dir} (using ramdisk)")
             return temp_dir
         else:
             temp_dir = tempfile.mkdtemp(prefix="weights_temp_")
@@ -124,7 +124,7 @@ def save_model_with_compression(model, output_path: str):
                 with lz4.frame.open(
                     compressed_path,
                     "wb",
-                    compression_level=3,
+                    compression_level=16,
                     content_checksum=True,
                     block_size=lz4.frame.BLOCKSIZE_MAX4MB,
                 ) as f_out:
@@ -757,11 +757,26 @@ def main():
     # Save model weights only if we did training
     if not args.skip_training:
         print(f"\n=== Saving finetuned model to {args.output_model} ===")
-        output_path = (
-            args.output_model
-            if args.output_model.endswith(".weights.h5")
-            else f"{args.output_model}.weights.h5"
-        )
+        
+        # Ensure output goes to /kaggle/working
+        kaggle_working = "/kaggle/working"
+        if not os.path.exists(kaggle_working):
+            os.makedirs(kaggle_working, exist_ok=True)
+            
+        if not args.output_model.startswith("/kaggle/working/"):
+            if args.output_model.startswith("/"):
+                # Absolute path, use just the filename in /kaggle/working
+                filename = os.path.basename(args.output_model)
+                output_path = f"/kaggle/working/{filename}"
+            else:
+                # Relative path, prepend /kaggle/working/
+                output_path = f"/kaggle/working/{args.output_model}"
+        else:
+            output_path = args.output_model
+            
+        # Ensure .weights.h5 extension
+        if not output_path.endswith(".weights.h5"):
+            output_path = f"{output_path}.weights.h5"
 
         # Use ramdisk compression method
         save_model_with_compression(gemma_lm, output_path)
