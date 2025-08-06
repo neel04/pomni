@@ -10,6 +10,7 @@ from typing import Dict, List
 
 import keras
 import keras_hub
+import tensorflow as tf
 from dotenv import load_dotenv
 from google.generativeai.generative_models import GenerativeModel
 from keras_hub.models import Gemma3CausalLM
@@ -89,6 +90,22 @@ def save_model_with_compression(model, output_path: str):
         temp_weights_path = os.path.join(temp_path, "temp_model.weights.h5")
         print(f"Saving weights to temp directory: {temp_weights_path}")
 
+        # Cast model weights to bfloat16 to reduce file size
+        print("Converting model weights to bfloat16 for storage...")
+        original_weights = {}
+        for layer in model.layers:
+            if hasattr(layer, 'weights') and layer.weights:
+                # Store original weights for potential restoration
+                layer_name = layer.name
+                original_weights[layer_name] = layer.get_weights()
+                
+                # Cast each weight variable to bfloat16
+                weights = layer.get_weights()
+                new_weights = [w.astype('bfloat16') for w in weights]
+                layer.set_weights(new_weights)
+        
+        print("Weight conversion to bfloat16 completed")
+
         save_start = time.time()
         model.save_weights(temp_weights_path)
         save_time = time.time() - save_start
@@ -109,7 +126,7 @@ def save_model_with_compression(model, output_path: str):
 
         # Use appropriate chunk size based on file size
         chunk_size = min(
-            64 * 1024 * 1024, max(8 * 1024 * 1024, original_size // 1000)
+            8 * 256 * 1024 * 1024, max(64 * 32 * 1024 * 1024, original_size // 1000)
         )  # 8-64MB chunks
         print(f"Using chunk size: {chunk_size / (1024 * 1024):.1f} MB")
 
