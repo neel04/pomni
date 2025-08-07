@@ -92,18 +92,13 @@ def save_model_with_compression(model, output_path: str):
 
         # Cast model weights to bfloat16 to reduce file size
         print("Converting model weights to bfloat16 for storage...")
-        original_weights = {}
+
         for layer in model.layers:
-            if hasattr(layer, 'weights') and layer.weights:
-                # Store original weights for potential restoration
-                layer_name = layer.name
-                original_weights[layer_name] = layer.get_weights()
-                
-                # Cast each weight variable to bfloat16
+            if hasattr(layer, "weights") and layer.weights:
                 weights = layer.get_weights()
-                new_weights = [w.astype('bfloat16') for w in weights]
+                new_weights = [w.astype("bfloat16") for w in weights]
                 layer.set_weights(new_weights)
-        
+
         print("Weight conversion to bfloat16 completed")
 
         save_start = time.time()
@@ -111,6 +106,9 @@ def save_model_with_compression(model, output_path: str):
         save_time = time.time() - save_start
         print(f"Weights saved in {save_time:.1f} seconds")
 
+        model.save("hf://Neel-Gupta/pomni")
+        print(f"Model uploaded to HF in {save_time:.1f} seconds")
+        
         # Check if file was saved successfully
         if not os.path.exists(temp_weights_path):
             raise FileNotFoundError(f"Failed to save weights to {temp_weights_path}")
