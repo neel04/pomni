@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import random
 import re
 import shutil
 import tempfile
@@ -101,13 +102,14 @@ def save_model_with_compression(model, output_path: str):
 
         print("Weight conversion to bfloat16 completed")
 
+        model.save(hf_path := "hf://Neel-Gupta/pomni")
+        print(f"Model uploaded to HF @ " + hf_path)
+
         save_start = time.time()
         model.save_weights(temp_weights_path)
         save_time = time.time() - save_start
         print(f"Weights saved in {save_time:.1f} seconds")
 
-        model.save("hf://Neel-Gupta/pomni")
-        print(f"Model uploaded to HF in {save_time:.1f} seconds")
         
         # Check if file was saved successfully
         if not os.path.exists(temp_weights_path):
@@ -689,9 +691,17 @@ def main():
         for ds in train_datasets[1:]:
             combined_dataset += ds
 
+        # Convert to list for shuffling
+        dataset_list = list(combined_dataset)
+        
+        # Set random seed for reproducibility
+        random.seed(args.seed)
+        random.shuffle(dataset_list)
+        print(f"Shuffled training dataset with seed {args.seed}")
+
         data = {
-            "prompts": [sample["text_input"] for sample in combined_dataset],
-            "responses": [sample["output"] for sample in combined_dataset],
+            "prompts": [sample["text_input"] for sample in dataset_list],
+            "responses": [sample["output"] for sample in dataset_list],
         }
         print(
             f"Loaded and combined {len(data['prompts'])} training samples from {len(args.train_data)} files"
