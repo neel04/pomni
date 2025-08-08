@@ -1,5 +1,6 @@
 import os
 
+import keras
 import keras_hub
 import requests
 import streamlit as st
@@ -44,6 +45,23 @@ def download_weights(url, dest):
 @st.cache_resource
 def load_gemma_model():
     """Loads the fine-tuned Gemma model and caches it."""
+    
+    # First try loading from HuggingFace
+    try:
+        st.info("Attempting to load model from HuggingFace: hf://Neel-Gupta/pomni")
+        model = keras.saving.load_model("hf://Neel-Gupta/pomni")
+        st.success("Successfully loaded model from HuggingFace: hf://Neel-Gupta/pomni")
+        
+        # Compile the model for inference
+        sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
+        model.compile(sampler=sampler)
+        return model
+        
+    except Exception as e:
+        st.warning(f"Failed to load from HuggingFace: {e}")
+        st.info("Falling back to local weights loading...")
+    
+    # Fallback to original logic
     preset = "gemma3_instruct_1b"
     weights_path = "/Users/neel/Downloads/finetuned_gemma3_1b.weights.h5"
 
