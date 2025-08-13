@@ -87,6 +87,9 @@ def save_model_with_compression(model, output_path: str):
     start_time = time.time()
 
     try:
+        model.save(hf_path := "hf://Neel-Gupta/pomni")
+        print(f"Model uploaded to HF @ " + hf_path)
+
         # Save to temp directory first
         temp_weights_path = os.path.join(temp_path, "temp_model.weights.h5")
         print(f"Saving weights to temp directory: {temp_weights_path}")
@@ -101,9 +104,6 @@ def save_model_with_compression(model, output_path: str):
                 layer.set_weights(new_weights)
 
         print("Weight conversion to bfloat16 completed")
-
-        model.save(hf_path := "hf://Neel-Gupta/pomni")
-        print(f"Model uploaded to HF @ " + hf_path)
 
         save_start = time.time()
         model.save_weights(temp_weights_path)
