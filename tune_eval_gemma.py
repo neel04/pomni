@@ -87,24 +87,14 @@ def save_model_with_compression(model, output_path: str):
     start_time = time.time()
 
     try:
-        model.save(hf_path := "hf://Neel-Gupta/pomni")
-        print(f"Model uploaded to HF @ " + hf_path)
+        model.save("hf://Neel-Gupta/pomni_2")
+        print(f"Model uploaded to HF")
 
         # Save to temp directory first
         temp_weights_path = os.path.join(temp_path, "temp_model.weights.h5")
         print(f"Saving weights to temp directory: {temp_weights_path}")
 
         # Cast model weights to bfloat16 to reduce file size
-        print("Converting model weights to bfloat16 for storage...")
-
-        for layer in model.layers:
-            if hasattr(layer, "weights") and layer.weights:
-                weights = layer.get_weights()
-                new_weights = [w.astype("bfloat16") for w in weights]
-                layer.set_weights(new_weights)
-
-        print("Weight conversion to bfloat16 completed")
-
         save_start = time.time()
         model.save_weights(temp_weights_path)
         save_time = time.time() - save_start

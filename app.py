@@ -93,8 +93,9 @@ def load_gemma_model():
     return model
 
 
-gemma_model = load_gemma_model()
+keras.mixed_precision.set_global_policy("mixed_bfloat16")
 
+gemma_model = load_gemma_model()
 
 # --- Chat Interface ---
 st.title("Chat with Fine-tuned Gemma")
@@ -112,16 +113,13 @@ for message in st.session_state.chat_history:
 
 # Chat input
 if prompt := st.chat_input("What is up?"):
-    st.session_state.chat_history.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
             # Add system prompt to make the model nice, polite and helpful
-            system_prompt = "You are a helpful, polite, and friendly AI assistant. Please provide clear, concise, and accurate responses while maintaining a warm and respectful tone."
-            full_prompt = f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:"
-            response = gemma_model.generate(full_prompt, max_length=1024)
+            # system_prompt = "You are a helpful, polite, and friendly AI assistant. Please provide clear, concise, and accurate responses while maintaining a warm and respectful tone."
+            # full_prompt = f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:"
+            full_prompt = f"<p>{prompt}</p>"
+            response = gemma_model.generate(full_prompt, max_length=128)
 
             # Extract just the assistant's response (remove the prompt part)
             if full_prompt in response:
