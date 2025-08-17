@@ -567,7 +567,7 @@ def main():
         
         # Also save to HuggingFace if needed
         try:
-            gemma_lm.save("hf://Neel-Gupta/pomni_2")
+            gemma_lm.save("hf://Neel-Gupta/pomni_2", zipped=True)
             print("✅ Model uploaded to HF")
         except Exception as e:
             print(f"Warning: Failed to upload to HF: {e}")
