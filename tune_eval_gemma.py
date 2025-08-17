@@ -125,6 +125,7 @@ def fine_tune_model(
     weight_decay: float,
     epochs: int,
     batch_size: int,
+    ddp: bool = False,
 ):
     model.backbone.enable_lora(rank=rank)
     print(model.summary())
@@ -143,7 +144,31 @@ def fine_tune_model(
     )
     keras.mixed_precision.set_global_policy("mixed_bfloat16")
 
-    model.fit(data, epochs=epochs, batch_size=batch_size)
+    # For DDP mode, we need to ensure data length is divisible by batch_size
+    # to avoid incomplete batches that can't be distributed across devices
+    if ddp:
+        num_devices = len(keras.distribution.list_devices())
+        total_samples = len(data["prompts"])
+        
+        # Calculate how many samples to use (drop incomplete batches)
+        samples_per_batch = batch_size
+        usable_batches = total_samples // samples_per_batch
+        usable_samples = usable_batches * samples_per_batch
+        
+        if usable_samples < total_samples:
+            print(f"DDP mode: Dropping {total_samples - usable_samples} samples to avoid incomplete batches")
+            print(f"Using {usable_samples} samples ({usable_batches} complete batches of size {samples_per_batch})")
+            
+            # Truncate data to usable samples
+            truncated_data = {
+                "prompts": data["prompts"][:usable_samples],
+                "responses": data["responses"][:usable_samples],
+            }
+            model.fit(truncated_data, epochs=epochs, batch_size=batch_size)
+        else:
+            model.fit(data, epochs=epochs, batch_size=batch_size)
+    else:
+        model.fit(data, epochs=epochs, batch_size=batch_size)
 
 
 def generate_eval_template(question: str, answer_1: str, answer_2: str):
@@ -484,6 +509,7 @@ def main():
             weight_decay=args.weight_decay,
             epochs=args.epochs,
             batch_size=args.batch_size,
+            ddp=args.ddp,
         )
 
         print("\n=== Testing inference after fine-tuning ===")
