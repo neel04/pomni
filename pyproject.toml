@@ -3,7 +3,7 @@ name = "pomni"
 version = "0.1.0"
 description = "JAX Code assistant"
 readme = "README.md"
-requires-python = "==3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "dotenv>=0.9.9",
     "google-generativeai>=0.8.5",
@@ -18,8 +18,10 @@ dependencies = [
     "patdb>=0.1.0",
     "pylsp-rope>=0.1.17",
     "requests>=2.32.3",
+    "rich>=14.0.0",
     "sentencepiece>=0.2.0",
     "streamlit>=1.47.1",
+    "textual>=5.3.0",
     "torch>=2.8.0",
     "vertexai>=1.71.1",
     "watchdog>=6.0.0",
