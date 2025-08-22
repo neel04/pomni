@@ -75,8 +75,8 @@ Screen {
     background: $panel;
     padding: 1;
     text-align: center;
-    color: $text;
-    border-bottom: tall $primary 15%;
+    color: $foreground;
+    border-bottom: round $primary 20%;
 }
 
 #chat-messages {
