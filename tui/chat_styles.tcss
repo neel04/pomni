@@ -1,0 +1,159 @@
+/* POMNI Styles - minimal, centered, clean */
+
+/* Global */
+Screen {
+    background: $background;
+}
+
+.hidden { display: none; }
+
+/* Shared card look */
+#splash-content,
+#welcome-content,
+#loader-content {
+    width: 64;
+    padding: 2;
+    background: $surface;
+    border: solid $primary;
+    border-title-color: $primary;
+    border-title-align: center;
+    border: round $primary;
+}
+
+/* Center full-screen sections */
+#splash,
+#welcome,
+#loader {
+    align: center middle;
+    height: 100%;
+}
+
+/* Splash */
+#splash-text {
+    text-align: center;
+    margin-bottom: 2;
+}
+
+#splash-content Button {
+    width: 100%;
+}
+
+/* Welcome */
+#welcome-content {
+    align: center middle;
+}
+#welcome-text {
+    margin-bottom: 2;
+    text-align: left;
+}
+#welcome-content Button {
+    width: 100%;
+}
+
+/* Loader */
+#loader-title {
+    text-align: center;
+    margin-bottom: 1;
+}
+#progress {
+    width: 100%;
+    margin: 1 0;
+}
+#loader-status {
+    text-align: center;
+    margin-top: 1;
+}
+
+/* Chat layout */
+#chat {
+    layout: vertical;
+    height: 100%;
+}
+
+#chat-header {
+    height: 3;
+    background: $panel;
+    padding: 1;
+    text-align: center;
+    color: $text;
+    border-bottom: tall $primary 15%;
+}
+
+#chat-messages {
+    height: 1fr;
+    background: $surface;
+    padding: 1;
+    border: solid $primary 20%;
+    margin: 1;
+}
+
+#welcome-msg {
+    color: $text-muted;
+    text-align: center;
+    margin: 1;
+}
+
+/* Input area */
+#chat-input-area {
+    height: auto;
+    padding: 1;
+    layout: horizontal;
+    grid-gutter: 1;
+    border-top: tall $primary 15%;
+    background: $panel;
+}
+
+#message-input {
+    width: 1fr;
+    height: 3;
+}
+
+#send-btn {
+    width: 16;
+    height: 3;
+}
+
+/* Buttons & inputs */
+Button {
+    min-width: 14;
+    height: 3;
+}
+
+Button:focus {
+    border: solid $primary;
+    background: $primary 15%;
+}
+
+Button.-disabled {
+    color: $text-muted;
+    background: $boost 5%;
+}
+
+Input {
+    height: 3;
+}
+
+Input:focus {
+    border: solid $primary;
+}
+
+/* Modal */
+#modal-content {
+    background: $surface;
+    border: thick $primary;
+    padding: 2;
+    width: 60;
+    height: auto;
+}
+
+#modal-buttons {
+    layout: horizontal;
+    height: 3;
+    margin-top: 2;
+    align-horizontal: center;
+    grid-gutter: 2;
+}
+
+#modal-buttons Button {
+    width: 18;
+}
