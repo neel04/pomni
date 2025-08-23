@@ -1,9 +1,8 @@
+import multiprocessing as mp
 import os
 
 import keras
 import keras_hub
-import requests
-from keras_hub.models import Gemma3CausalLM
 from rich.align import Align
 from rich.panel import Panel
 from rich.text import Text
@@ -165,7 +164,7 @@ class PomniChatTUI(App):
         """Called when app starts."""
         # Set a pleasant default theme (allow override via env)
         try:
-            default_theme = os.environ.get("POMNI_THEME", "textual-dark")
+            default_theme = os.environ.get("POMNI_THEME", "monokai")
             self.theme = default_theme
         except Exception:
             pass
@@ -190,53 +189,17 @@ class PomniChatTUI(App):
     @work(thread=True)
     def load_model_async(self) -> None:
         """Load the model in a background thread."""
-        self.update_status("Loading Gemma model... This may take a while.")
+        self.update_status("Loading Gemma model from HuggingFace... This may take a while.")
 
         try:
-            # Try loading from HuggingFace first
-            self.update_status("Attempting to load model from HuggingFace...")
-            try:
-                model = keras.saving.load_model("hf://Neel-Gupta/pomni_4B")
-                self.update_status("Successfully loaded model from HuggingFace!")
+            # Load from HuggingFace only
+            model = keras.saving.load_model("hf://Neel-Gupta/pomni_4B")
+            self.update_status("Successfully loaded model from HuggingFace!")
 
-                # Compile the model
-                sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
-                model.compile(sampler=sampler)
-                self.model = model
-
-            except Exception:
-                self.update_status(
-                    "HuggingFace loading failed. Trying local weights..."
-                )
-
-                # Fallback to local weights
-                preset = "gemma3_instruct_1b"
-                weights_path = "/Users/neel/Downloads/finetuned_gemma3_1b.weights.h5"
-                weights_url = "https://filebin.net/gmmu2zultifcjlgi/finetuned_gemma3_1b.weights.h5"
-
-                if not os.path.exists(weights_path):
-                    self.update_status("Downloading model weights...")
-                    if not self.download_weights(weights_url, weights_path):
-                        self.update_status(
-                            "Failed to download weights. Using base model."
-                        )
-
-                model = Gemma3CausalLM.from_preset(preset, dtype="bfloat16")
-
-                if os.path.exists(weights_path):
-                    try:
-                        model.load_weights(weights_path)
-                        self.update_status("Successfully loaded fine-tuned weights!")
-                    except Exception as e:
-                        self.update_status(
-                            f"Error loading weights: {e}. Using base model."
-                        )
-                else:
-                    self.update_status("Using base model.")
-
-                sampler = keras_hub.samplers.TopKSampler(k=5, seed=42)
-                model.compile(sampler=sampler)
-                self.model = model
+            # Compile the model
+            sampler = keras_hub.samplers.TopKSampler(k=50, seed=420)
+            model.compile(sampler=sampler)
+            self.model = model
 
             self.is_loading = False
             self.update_status("✅ Model loaded successfully! You can start chatting.")
@@ -247,30 +210,10 @@ class PomniChatTUI(App):
             input_widget.focus()
 
         except Exception as e:
-            self.update_status(f"❌ Error loading model: {str(e)}")
+            # Log the error and leave input disabled
+            self.update_status(f"❌ Error loading model from HuggingFace: {e}")
             self.is_loading = False
 
-    def download_weights(self, url: str, dest: str) -> bool:
-        """Download weights with progress indication."""
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-            total_size = int(response.headers.get("content-length", 0))
-
-            with open(dest, "wb") as f:
-                bytes_downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-                    bytes_downloaded += len(chunk)
-                    if total_size > 0:
-                        progress = min(int((bytes_downloaded / total_size) * 100), 100)
-                        self.update_status(
-                            f"Downloading... {bytes_downloaded // 1024**2}MB / {total_size // 1024**2}MB ({progress}%)"
-                        )
-
-            return True
-        except requests.exceptions.RequestException as _:
-            return False
 
     def update_status(self, message: str) -> None:
         """Update the status bar.
@@ -358,13 +301,13 @@ class PomniChatTUI(App):
         """Generate model response in background thread."""
         try:
             # System prompt for nice behavior
-            system_prompt = "Always be concise: give short, direct answers with only essential details. "
+            system_prompt = "Always be concise: give short, direct answers with only essential details."
             full_prompt = f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:"
 
             # Generate response with prompt stripping and automatic stop tokens
             response = self.model.generate(
                 full_prompt,
-                max_length=256,
+                max_length=128,
                 stop_token_ids="auto",
                 strip_prompt=True,
             )
@@ -432,5 +375,6 @@ class PomniChatTUI(App):
 
 
 if __name__ == "__main__":
+    mp.set_start_method('fork')
     app = PomniChatTUI()
     app.run()
