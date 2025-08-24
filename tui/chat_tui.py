@@ -4,6 +4,7 @@ import os
 import keras
 import keras_hub
 from rich.align import Align
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 from textual import events, work
@@ -44,9 +45,24 @@ class ChatMessage(Static):
                 padding=(0, 1),
             )
         else:
-            text = Text(self.content, style="green")
+            # Render assistant content as Markdown with syntax highlighting when possible
+            content = self.content
+            try:
+                has_md = (
+                    ("```" in content)
+                    or ("#" in content)
+                    or ("*" in content and "**" in content)
+                    or ("- " in content)
+                    or ("1." in content)
+                )
+                if has_md:
+                    renderable = Markdown(content, code_theme="monokai")
+                else:
+                    renderable = Text(content, style="green")
+            except Exception:
+                renderable = Text(content, style="green")
             return Panel(
-                text,
+                renderable,
                 title="[bold orange3]Pomni[/bold orange3]",
                 title_align="left",
                 border_style="green",
@@ -164,7 +180,7 @@ class PomniChatTUI(App):
         """Called when app starts."""
         # Set a pleasant default theme (allow override via env)
         try:
-            default_theme = os.environ.get("POMNI_THEME", "monokai")
+            default_theme = os.environ.get("POMNI_THEME", "textual-dark")
             self.theme = default_theme
         except Exception:
             pass
@@ -189,7 +205,9 @@ class PomniChatTUI(App):
     @work(thread=True)
     def load_model_async(self) -> None:
         """Load the model in a background thread."""
-        self.update_status("Loading Gemma model from HuggingFace... This may take a while.")
+        self.update_status(
+            "Loading Gemma model from HuggingFace... This may take a while."
+        )
 
         try:
             # Load from HuggingFace only
@@ -213,7 +231,6 @@ class PomniChatTUI(App):
             # Log the error and leave input disabled
             self.update_status(f"❌ Error loading model from HuggingFace: {e}")
             self.is_loading = False
-
 
     def update_status(self, message: str) -> None:
         """Update the status bar.
@@ -254,7 +271,7 @@ class PomniChatTUI(App):
         try:
             welcome = chat_container.query_one("#welcome")
             welcome.remove()
-        except:
+        except Exception:
             pass
 
         await chat_container.mount(ChatMessage("user", user_message))
@@ -301,7 +318,7 @@ class PomniChatTUI(App):
         """Generate model response in background thread."""
         try:
             # System prompt for nice behavior
-            system_prompt = "Always be concise: give short, direct answers with only essential details."
+            system_prompt = "You are an assistant. Always be concise: give short, direct answers with only essential details."
             full_prompt = f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:"
 
             # Generate response with prompt stripping and automatic stop tokens
@@ -344,25 +361,32 @@ class PomniChatTUI(App):
         self.chat_history.clear()
         chat_container = self.query_one("#chat_container", ChatContainer)
 
-        # Remove all messages
-        for message in chat_container.query(ChatMessage):
+        # Remove all existing ChatMessage widgets
+        for message in list(chat_container.query(ChatMessage)):
             message.remove()
 
-            # Add welcome back
-            chat_container.mount(
-                Static(
-                    Panel(
-                        Align.center(
-                            "[bold orange3]✨ Chat Cleared ✨[/bold orange3]\n"
-                            "[dim]Start a new conversation[/dim]",
-                            vertical="middle",
-                        ),
-                        border_style="orange3",
-                        padding=1,
+        # Remove any existing welcome widget to avoid DuplicateIds
+        try:
+            existing_welcome = chat_container.query_one("#welcome")
+            existing_welcome.remove()
+        except Exception:
+            pass
+
+        # Mount a single welcome widget
+        chat_container.mount(
+            Static(
+                Panel(
+                    Align.center(
+                        "[bold orange3]✨ Chat Cleared ✨[/bold orange3]\n"
+                        "[dim]Start a new conversation[/dim]",
+                        vertical="middle",
                     ),
-                    id="welcome",
-                )
+                    border_style="orange3",
+                    padding=1,
+                ),
+                id="welcome",
             )
+        )
         self.update_status("Chat history cleared!")
 
     async def on_unmount(self) -> None:
@@ -375,6 +399,6 @@ class PomniChatTUI(App):
 
 
 if __name__ == "__main__":
-    mp.set_start_method('fork')
+    mp.set_start_method("fork")
     app = PomniChatTUI()
     app.run()
