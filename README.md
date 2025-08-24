@@ -19,4 +19,4 @@ to automatically download and run the model.
 
 ## Screenshot
 
-![Pomni TUI](https://raw.githubusercontent.com/nee04/pomni/main/tui/pomni_tui_ss.jpeg)
+![pomni_tui_ss](https://github.com/user-attachments/assets/ea15a878-4ce7-478d-b599-0702edb0cf70)
