@@ -27,6 +27,18 @@ dependencies = [
     "watchdog>=6.0.0",
 ]
 
+[project.scripts]
+pomni = "tui.chat_tui:main"
+
+[build-system]
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Package the 'tui' module from the repository root (no src/ layout)
+module-name = "tui"
+module-root = ""
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.29.2",

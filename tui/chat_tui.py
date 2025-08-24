@@ -398,7 +398,16 @@ class PomniChatTUI(App):
             pass
 
 
-if __name__ == "__main__":
-    mp.set_start_method("fork")
+def main() -> None:
+    """Console script entry point to launch the Pomni TUI."""
+    # On macOS and Linux, prefer 'fork' for Keras/JAX unless overridden
+    try:
+        mp.set_start_method("fork", force=True)
+    except Exception:
+        pass
     app = PomniChatTUI()
     app.run()
+
+
+if __name__ == "__main__":
+    main()
