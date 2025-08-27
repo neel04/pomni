@@ -24,8 +24,16 @@ Screen {
 #splash,
 #welcome,
 #loader {
+    /* Convert the container to a single-cell grid */
+    layout: grid;
+    grid-size: 1;
+
+    /* Center the grid's content (the box) in that single cell */
     align: center middle;
-    height: 100%;
+
+    /* Ensure the grid fills the viewport */
+    width: 100vw;
+    height: 100vh;
 }
 
 /* Splash */

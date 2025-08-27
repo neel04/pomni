@@ -10,9 +10,10 @@ from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import ScrollableContainer, Vertical
+from textual.containers import ScrollableContainer, Vertical, Grid
 from textual.reactive import reactive
-from textual.widgets import Footer, Header, Input, RichLog, Static
+from textual.screen import ModalScreen
+from textual.widgets import Button, Footer, Header, Input, RichLog, Static, Label
 
 
 class PrintConsole(RichLog):
@@ -101,6 +102,147 @@ class ChatContainer(ScrollableContainer):
         )
 
 
+
+
+class DownloadConfirmScreen(ModalScreen[tuple[bool, str]]):
+    """Modal dialog asking user to confirm model download on startup and select model.
+
+    Returns (proceed, model_repo) where model_repo is the HF repo id.
+    """
+
+    CSS = """
+    DownloadConfirmScreen { 
+        align: center middle;
+        layout: vertical;
+    }
+    #dialog { 
+        grid-size: 2; 
+        grid-gutter: 1 2; 
+        grid-rows: 1fr auto auto auto; 
+        padding: 2; 
+        width: 76; 
+        height: 20;
+        border: thick $background 80%;
+        background: $surface;
+        align: center middle;
+    }
+    #question { 
+        column-span: 2; 
+        height: 1fr; 
+        width: 1fr; 
+        content-align: center middle;
+    }
+    #model_label { 
+        column-span: 2; 
+        padding: 0 0;
+    }
+    #model_buttons { 
+        column-span: 2; 
+        layout: horizontal; 
+        content-align: center middle;
+        height: 3;
+        width: 100%;
+    }
+    #model_buttons Button {
+        width: 1fr;
+        margin: 0 1;
+    }
+    Button { 
+        width: 100%; 
+    }
+    .selected { 
+        border: solid $primary; 
+    }
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        # Default selection: 4B recommended
+        self._selected: str = "Neel-Gupta/pomni_4B"
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label(
+                "This app will download and load a chat model from HuggingFace.\n"
+                "The download may be several GB and could take time depending on your connection.\n\n"
+                "Select a model and proceed to start the chat:",
+                id="question",
+            ),
+            Label("Choose a model (4B recommended):", id="model_label"),
+            Grid(
+                Button("4B — Recommended", id="opt_4b", variant="warning", classes="recommended selected"),
+                Button("12B", id="opt_12b", variant="primary"),
+                id="model_buttons",
+            ),
+            Button("Yes, proceed", id="yes", variant="success"),
+            Button("No, exit", id="no", variant="error"),
+            id="dialog",
+        )
+
+    BINDINGS = [
+        ("left", "focus_prev", ""),
+        ("right", "focus_next", ""),
+        ("escape", "dismiss_no", ""),
+        ("1", "select_4b", ""),
+        ("2", "select_12b", ""),
+    ]
+
+    def action_focus_next(self) -> None:
+        try:
+            self.focus_next()
+        except Exception:
+            pass
+
+    def action_focus_prev(self) -> None:
+        try:
+            self.focus_previous()
+        except Exception:
+            pass
+
+    def action_dismiss_no(self) -> None:
+        self.dismiss((False, self._selected))
+
+    def action_select_4b(self) -> None:
+        self._set_selection("Neel-Gupta/pomni_4B")
+
+    def action_select_12b(self) -> None:
+        self._set_selection("Neel-Gupta/pomni")
+
+    def _set_selection(self, repo: str) -> None:
+        self._selected = repo
+        try:
+            b4 = self.query_one("#opt_4b", Button)
+            b12 = self.query_one("#opt_12b", Button)
+            # Reset classes
+            b4.set_class(False, "selected")
+            b12.set_class(False, "selected")
+            # Apply to selected
+            if repo.endswith("_4B"):
+                b4.set_class(True, "selected")
+            else:
+                b12.set_class(True, "selected")
+        except Exception:
+            pass
+
+    def on_mount(self) -> None:
+        # Set initial focus to the "Yes" button so arrows work immediately
+        try:
+            self.query_one("#yes", Button).focus()
+        except Exception:
+            pass
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "opt_4b":
+            self._set_selection("Neel-Gupta/pomni_4B")
+            return
+        if event.button.id == "opt_12b":
+            self._set_selection("Neel-Gupta/pomni")
+            return
+        if event.button.id == "yes":
+            self.dismiss((True, self._selected))
+        else:
+            self.dismiss((False, self._selected))
+
+
 class PomniChatTUI(App):
     """A TUI chatbot application using Gemma model."""
 
@@ -148,6 +290,11 @@ class PomniChatTUI(App):
     ChatMessage { margin: 0 0 1 0; }
     
     LoadingIndicator { height: 1; }
+
+    /* Modal centering & layout for confirm */
+    DownloadConfirmScreen { align: center middle; }
+    #download_dialog { width: 72; }
+    #download_buttons { layout: horizontal; grid-gutter: 2; align-horizontal: center; }
     """
 
     BINDINGS = [
@@ -162,6 +309,7 @@ class PomniChatTUI(App):
         self.chat_history = []
         self.is_loading = True
         self.title = "Pomni Chat"
+        self._selected_repo: str = "Neel-Gupta/pomni_4B"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -192,7 +340,28 @@ class PomniChatTUI(App):
         except Exception:
             # If console is not available for any reason, continue without capture
             pass
-        self.load_model_async()
+
+        # Show confirmation modal before any downloads / loading
+        self.push_screen(DownloadConfirmScreen(), self._on_download_decision)
+
+    def _on_download_decision(self, result) -> None:
+        """Handle user's choice from the download confirmation dialog.
+
+        Result is a tuple (proceed: bool, repo: str) from DownloadConfirmScreen.
+        """
+        try:
+            proceed, repo = result if isinstance(result, tuple) else (bool(result), "Neel-Gupta/pomni_4B")
+        except Exception:
+            proceed, repo = False, "Neel-Gupta/pomni_4B"
+        self._selected_repo = repo
+        if proceed:
+            # User accepted; start loading
+            self.update_status(f"Preparing to download / load model: {repo} …")
+            self.load_model_async()
+        else:
+            # User declined; quit the app immediately
+            self.update_status("Exiting without downloading the model.")
+            self.exit()
 
     def action_toggle_console(self) -> None:
         """Show / hide the diagnostics console."""
@@ -211,8 +380,9 @@ class PomniChatTUI(App):
 
         try:
             # Load from HuggingFace only
-            model = keras.saving.load_model("hf://Neel-Gupta/pomni_4B")
-            self.update_status("Successfully loaded model from HuggingFace!")
+            repo = getattr(self, "_selected_repo", "Neel-Gupta/pomni_4B")
+            model = keras.saving.load_model(f"hf://{repo}")
+            self.update_status(f"Successfully loaded model from HuggingFace: {repo}!")
 
             # Compile the model
             sampler = keras_hub.samplers.TopKSampler(k=50, seed=420)
