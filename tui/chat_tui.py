@@ -13,7 +13,8 @@ from textual.binding import Binding
 from textual.containers import ScrollableContainer, Vertical, Grid
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, RichLog, Static, Label
+from textual.widgets import Button, Footer, Header, RichLog, Static, Label
+from textual.widgets import TextArea
 
 
 class PrintConsole(RichLog):
@@ -100,8 +101,6 @@ class ChatContainer(ScrollableContainer):
             ),
             id="welcome",
         )
-
-
 
 
 class DownloadConfirmScreen(ModalScreen[tuple[bool, str]]):
@@ -276,11 +275,24 @@ class PomniChatTUI(App):
         scrollbar-background: $scrollbar-background;
     }
     
+    /* TextArea styling */
     #user_input {
-        margin: 1;
-        height: 3;
+        margin: 0 1 1 1;
+        height: 5;  /* Multi-line height */
+        border: round $primary 20%;
     }
-    Input:focus { border: solid $primary; background: $boost 5%; }
+    
+    #user_input:focus {
+        border: solid $primary;
+    }
+    
+    /* Help text styling */
+    #input_help {
+        margin: 0 1;
+        height: 1;
+        color: $text-muted;
+        text-align: center;
+    }
     
     StatusBar {
         height: 3;
@@ -301,6 +313,7 @@ class PomniChatTUI(App):
         Binding("ctrl+c", "quit", "Quit", priority=True),
         Binding("ctrl+l", "clear_chat", "Clear Chat"),
         Binding("ctrl+`", "toggle_console", "Toggle Console"),
+        Binding("ctrl+enter", "send_message", "Send Message"),
     ]
 
     def __init__(self):
@@ -317,10 +330,14 @@ class PomniChatTUI(App):
             yield ChatContainer(id="chat_container")
             yield PrintConsole(id="console")
             yield StatusBar(id="status_bar")
-            yield Input(
-                placeholder="Type your message here... (Press Enter to send)",
+            yield Label("[dim]Type your message below (Press Ctrl+Enter to send):[/dim]", id="input_help")
+            yield TextArea(
+                "",  # Start with empty text
                 id="user_input",
                 disabled=True,
+                show_line_numbers=False,  # Hide line numbers for cleaner look
+                theme="css",  # Use CSS theme to inherit app styling
+                soft_wrap=True,  # Enable soft wrapping for long lines
             )
         yield Footer()
 
@@ -371,6 +388,20 @@ class PomniChatTUI(App):
         except Exception:
             pass
 
+    async def action_send_message(self) -> None:
+        """Send the message when Ctrl+Enter is pressed."""
+        if self.is_loading or self.model is None:
+            return
+        
+        text_area = self.query_one("#user_input", TextArea)
+        message = text_area.text.strip()
+        
+        if message:
+            # Clear the text area
+            text_area.text = ""
+            # Process the message
+            await self.process_user_message(message)
+
     @work(thread=True)
     def load_model_async(self) -> None:
         """Load the model in a background thread."""
@@ -390,10 +421,10 @@ class PomniChatTUI(App):
             self.model = model
 
             self.is_loading = False
-            self.update_status("✅ Model loaded successfully! You can start chatting.")
+            self.update_status("✅ Model loaded successfully! You can start chatting (Ctrl+Enter to send).")
 
             # Enable input
-            input_widget = self.query_one("#user_input", Input)
+            input_widget = self.query_one("#user_input", TextArea)
             input_widget.disabled = False
             input_widget.focus()
 
@@ -423,26 +454,15 @@ class PomniChatTUI(App):
         status_bar = self.query_one("#status_bar", StatusBar)
         status_bar.status_text = message
 
-    async def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle user input submission."""
-        if not event.value.strip() or self.is_loading or self.model is None:
-            return
-
-        user_message = event.value.strip()
-
-        # Clear input
-        input_widget = self.query_one("#user_input", Input)
-        input_widget.value = ""
-
+    async def process_user_message(self, user_message: str) -> None:
+        """Process a user message."""
         # Add user message to chat
         chat_container = self.query_one("#chat_container", ChatContainer)
 
-        # Remove welcome message if it exists
-        try:
-            welcome = chat_container.query_one("#welcome")
-            welcome.remove()
-        except Exception:
-            pass
+        # Remove any Static widgets (welcome/cleared messages) - they're not ChatMessages
+        for widget in list(chat_container.query(Static)):
+            if not isinstance(widget, ChatMessage):
+                widget.remove()
 
         await chat_container.mount(ChatMessage("user", user_message))
         chat_container.scroll_end(animate=True)
@@ -451,6 +471,7 @@ class PomniChatTUI(App):
         self.chat_history.append({"role": "user", "content": user_message})
 
         # Disable input while generating
+        input_widget = self.query_one("#user_input", TextArea)
         input_widget.disabled = True
         self.update_status("🤔 Thinking...")
 
@@ -520,11 +541,11 @@ class PomniChatTUI(App):
         self.chat_history.append({"role": "assistant", "content": message})
 
         # Re-enable input
-        input_widget = self.query_one("#user_input", Input)
+        input_widget = self.query_one("#user_input", TextArea)
         input_widget.disabled = False
         input_widget.focus()
 
-        self.update_status("✅ Ready for your next message!")
+        self.update_status("✅ Ready for your next message! (Ctrl+Enter to send)")
 
     def action_clear_chat(self) -> None:
         """Clear the chat history."""
