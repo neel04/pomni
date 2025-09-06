@@ -515,7 +515,7 @@ class PomniChatTUI(App):
             # Generate response with prompt stripping and automatic stop tokens
             response = self.model.generate(
                 full_prompt,
-                max_length=128,
+                max_length=512,
                 stop_token_ids="auto",
                 strip_prompt=True,
             )
